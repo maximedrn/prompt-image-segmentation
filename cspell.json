@@ -33,7 +33,7 @@
     "poetry.lock",
     "cspell.json",
     "lefthook.yaml",
-    "LICENSE.md",
+    "LICENSE",
     "Dockerfile",
     ".github/workflows/**.yaml",
   ]
