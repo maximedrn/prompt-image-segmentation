@@ -27,4 +27,4 @@ jobs:
         run: |
           git push --force \
             "https://${HF_USER}:${HF_TOKEN}@huggingface.co/spaces/${HF_USER}/${HF_SPACE}" \
-            main
+            HEAD:main

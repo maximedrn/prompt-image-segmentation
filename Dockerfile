@@ -29,16 +29,20 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
         libgl1 libglib2.0-0 libgoogle-perftools4 \
     && add-apt-repository -y ppa:deadsnakes/ppa \
     && apt-get install -y --no-install-recommends \
-        python3.13 python3.13-venv python3-pip \
+        python3.13 python3.13-venv python3.13-dev \
+    && python3.13 -m ensurepip --upgrade \
     && ln -sf /usr/bin/python3.13 /usr/local/bin/python \
     && ln -sf /usr/bin/python3.13 /usr/local/bin/python3
 
 COPY pyproject.toml poetry.lock ./
 
+# ponytail: everything explicit via ``python3.13 -m ...`` so nothing
+# leaks into Ubuntu's system python3.12 (which triggers the
+# audioop-lts py3.13-only build failure).
 RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install --break-system-packages poetry \
- && poetry install --only main --no-root \
- && pip install --break-system-packages \
+    python3.13 -m pip install --break-system-packages poetry \
+ && python3.13 -m poetry install --only main --no-root \
+ && python3.13 -m pip install --break-system-packages \
         --index-url "${TORCH_INDEX_URL}" --force-reinstall \
         "torch==${TORCH_VERSION}" "torchvision==${TORCHVISION_VERSION}"
 
