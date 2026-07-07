@@ -6,6 +6,7 @@ colorTo: blue
 sdk: docker
 app_port: 7860
 pinned: false
+python_version : "3.13"
 ---
 
 # Prompt SAM Segmentation
