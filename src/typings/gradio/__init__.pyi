@@ -112,7 +112,8 @@ class Image(Component):
         self,
         *,
         label: str | None = ...,
-        _type: Literal["numpy", "pil", "filepath"] = ...,
+        # pylint: disable=redefined-builtin
+        type: Literal["numpy", "pil", "filepath"] = ...,
     ) -> None:
         """Configure the label and marshalled image type."""
 

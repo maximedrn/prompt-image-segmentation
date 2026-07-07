@@ -58,7 +58,7 @@ def create_app() -> FastAPI:
     """
     settings: Settings = get_settings()
     fastapi_app: FastAPI = FastAPI(
-        title="Prompt SAM Segmenter",
+        title="Prompt image segmentation",
         version=__version__,
         description=(
             "Prompt-driven segmentation via GroundingDINO + SAM. "

@@ -23,7 +23,7 @@ from app.core import NoDetectionError, SegmenterError
 from app.domain import JSONValue, SegmentResponse
 from app.services import SegmentationService
 
-_TITLE: str = "Prompt SAM Segmenter"
+_TITLE: str = "Prompt image segmentation"
 
 
 def _decode_b64_png(payload: str) -> Image:
@@ -133,7 +133,6 @@ def build_gradio_blocks() -> Blocks:
             fn=_handle_submit,
             inputs=[image_in, prompt_in, person_in, backend_in],
             outputs=[image_out, mask_out, json_out],
-            show_api=False,
         )
     return blocks
 

@@ -1,5 +1,5 @@
 ---
-title: Prompt SAM Segmentation
+title: Prompt Image Segmentation
 emoji: 🎨
 colorFrom: green
 colorTo: blue
@@ -9,7 +9,7 @@ pinned: false
 python_version : "3.13"
 ---
 
-# Prompt SAM Segmentation
+# Prompt Image Segmentation
 
 Prompt-driven image segmentation. Give it an image and any text prompt - get back a binary mask and the cropped region.
 
