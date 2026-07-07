@@ -1,0 +1,24 @@
+# Python.
+**/__pycache__
+**/.mypy_cache
+**/*.py[cod]
+**/*.so
+.python-version
+
+# Git.
+.git
+.gitignore
+
+# Environments.
+.venv
+.env
+.env*
+
+# Projects.
+checkpoints/*
+!checkpoints/.gitkeep
+docker/
+cspell.json
+
+# Documentation.
+*.md

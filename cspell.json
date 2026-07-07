@@ -1,0 +1,39 @@
+{
+  "version": "0.2",
+  "language": "en",
+  "words": [
+    "amax",
+    "bboxes",
+    "cxcywh",
+    "facelib",
+    "fromarray",
+    "grayscale",
+    "groundingdino",
+    "healthcheck",
+    "healthz",
+    "huggingface",
+    "intp",
+    "multimask",
+    "RRGGBB",
+    "rtype",
+    "segmenters",
+    "Shilong",
+    "swint",
+    "uvicorn",
+    "xyxy"
+  ],
+  "ignorePaths": [
+    "**/.venv/**",
+    "**/.mypy_cache/**",
+    "**/.ruff_cache/**",
+    "**/__pycache__/**",
+    "**/*.pyc",
+    "**/*.pyo",
+    "pyproject.toml",
+    "poetry.lock",
+    "cspell.json",
+    "lefthook.yaml",
+    "LICENSE.md",
+    "Dockerfile"
+  ]
+}

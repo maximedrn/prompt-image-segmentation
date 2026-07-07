@@ -1,0 +1,35 @@
+services:
+  app:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      cache_from:
+        - app:latest
+    image: app:latest
+    container_name: app
+    ports:
+      - "${PORT:-7860}:7860"
+    env_file:
+      - ../.env
+    volumes:
+      # Persist SAM ViT-H (~2.4 GB) and any HuggingFace downloads
+      # across container recreations. Nothing else is bind-mounted.
+      - ../checkpoints:/app/checkpoints
+      - hf-cache:/root/.cache/huggingface
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:7860/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+
+volumes:
+  hf-cache: {}

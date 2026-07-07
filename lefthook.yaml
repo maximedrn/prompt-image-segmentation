@@ -1,0 +1,18 @@
+# Git hooks runner. Install once: `lefthook install`.
+# Run manually: `lefthook run pre-commit`.
+
+pre-commit:
+  parallel: true
+  commands:
+    format:
+      glob: "*.py"
+      run: poetry run black --check {staged_files}
+    pylint:
+      glob: "src/**/*.py"
+      run: poetry run pylint src
+    mypy:
+      glob: "src/**/*.py"
+      run: poetry run mypy src
+    cspell:
+      glob: "*.{py,md,toml,yaml,yml}"
+      run: cspell --no-progress --no-summary {staged_files}
