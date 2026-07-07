@@ -33,7 +33,7 @@ class Settings(BaseSettings):
     )
     host: str = Field(default="0.0.0.0", alias="HOST")
     port: int = Field(default=7860, alias="PORT")
-    ui_mount_path: str = Field(default="/ui", alias="UI_MOUNT_PATH")
+    ui_mount_path: str = Field(default="/", alias="UI_MOUNT_PATH")
     mask_padding_pct: int = Field(
         default=DEFAULT_MASK_PADDING_PCT, alias="MASK_PADDING_PCT"
     )
