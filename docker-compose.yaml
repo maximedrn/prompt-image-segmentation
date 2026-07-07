@@ -1,8 +1,7 @@
 services:
   app:
     build:
-      context: ..
-      dockerfile: docker/Dockerfile
+      context: .
       cache_from:
         - app:latest
     image: app:latest
@@ -10,11 +9,11 @@ services:
     ports:
       - "${PORT:-7860}:7860"
     env_file:
-      - ../.env
+      - .env
     volumes:
       # Persist SAM ViT-H (~2.4 GB) and any HuggingFace downloads
       # across container recreations. Nothing else is bind-mounted.
-      - ../checkpoints:/app/checkpoints
+      - ./checkpoints:/app/checkpoints
       - hf-cache:/root/.cache/huggingface
     deploy:
       resources:

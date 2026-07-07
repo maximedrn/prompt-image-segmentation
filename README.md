@@ -1,3 +1,13 @@
+---
+title: Prompt SAM Segmentation
+emoji: 🎨
+colorFrom: green
+colorTo: blue
+sdk: docker
+app_port: 7860
+pinned: false
+---
+
 # Prompt SAM Segmentation
 
 Prompt-driven image segmentation. Give it an image and any text prompt - get back a binary mask and the cropped region.
