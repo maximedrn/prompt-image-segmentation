@@ -90,7 +90,7 @@ def _handle_submit(
 
 
 def build_gradio_blocks() -> Blocks:
-    """Assemble the Gradio UI mounted under FastAPI at ``/ui``.
+    """Assemble the Gradio UI mounted under FastAPI.
 
     :returns: The Blocks instance to hand to
         :func:`gradio.mount_gradio_app`.

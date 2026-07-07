@@ -30,7 +30,7 @@ Prompt-driven image segmentation. Give it an image and any text prompt - get bac
 ```bash
 cp .env.template .env
 docker compose -f docker/docker-compose.yaml up --build
-# UI: http://localhost:7860/ui
+# UI: http://localhost:7860
 # Documentation: http://localhost:7860/docs
 ```
 
