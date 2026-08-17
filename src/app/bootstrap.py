@@ -27,14 +27,13 @@ from app.application.effects import CaughtSegment, SegmentFailure
 from app.application.wiring import wire_segment
 from app.application.policies import SegmentationPolicy
 from app.domain import (
-    FaceAnalysisUnavailable,
     PersonPayload,
     Prompt,
     SegmentedImage,
     SourceImage,
 )
 from app.infrastructure.dino import load_detector
-from app.infrastructure.facelib import load_face_analyser
+from app.infrastructure.faces import load_face_analyser
 from app.infrastructure.imaging import OpenCvMaskDilator
 from app.infrastructure.sam2 import load_refiner
 from app.settings import Settings
@@ -52,7 +51,7 @@ class Application:
     #: Backend name to the wired use case. One entry today; the mapping
     #: exists because the name is public API, not because a registry is.
     backends: dict[str, CaughtSegment]
-    face_analyser: FaceAnalyser | None
+    face_analyser: FaceAnalyser
 
     def segment(
         self,
@@ -88,13 +87,7 @@ class Application:
         :type image: app.domain.models.SourceImage
         :returns: The face summary.
         :rtype: app.domain.models.PersonPayload
-        :raises app.domain.errors.FaceAnalysisUnavailable: If the
-            optional extra was not installed at startup.
         """
-        if self.face_analyser is None:
-            raise FaceAnalysisUnavailable(
-                detail="The 'person' extra is not installed."
-            )
         return self.face_analyser.analyse(image)
 
 
@@ -175,13 +168,10 @@ def build(settings: Settings) -> Application:
         detector=detector, refiner=refiner, dilator=dilator, policy=policy
     )
 
-    analyser: FaceAnalyser | None = None
-    try:
-        analyser = load_face_analyser()
-    except FaceAnalysisUnavailable:
-        # Optional by design: the API answers 501 for face requests and
-        # serves every other route normally.
-        analyser = None
+    # No longer optional: the three artefacts total under 400 MB and
+    # ride the same hub cache as the rest, so there is nothing left to
+    # make optional.
+    analyser: FaceAnalyser = load_face_analyser(settings.face_policy())
 
     return Application(
         settings=settings,

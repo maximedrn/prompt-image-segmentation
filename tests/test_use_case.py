@@ -172,3 +172,18 @@ def test_prompt_validation_happens_at_the_boundary() -> None:
 
     with pytest.raises(InvalidPrompt):
         Prompt.parse("   ")
+
+
+def test_age_band_spanning_the_threshold_never_certifies() -> None:
+    """The band containing 18 must not certify adulthood.
+
+    The estimator that replaced facelib classifies into ranges rather
+    than years, so the band from ten to nineteen straddles the adult
+    threshold. Certifying it would be a guess dressed as a fact.
+    """
+    from app.domain import AgeBand, certainly_adult
+
+    assert certainly_adult(()) is True
+    assert certainly_adult((AgeBand.TWENTIES,)) is True
+    assert certainly_adult((AgeBand.TEEN,)) is False
+    assert certainly_adult((AgeBand.FORTIES, AgeBand.CHILD)) is False

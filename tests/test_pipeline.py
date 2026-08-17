@@ -153,3 +153,22 @@ def test_concurrent_requests_do_not_cross_over(
             f"{name} came back with another image's mask: "
             f"{bbox} != {expected[name]}"
         )
+
+
+def test_face_analysis_ignores_animals(application: Application) -> None:
+    """The replacement detector must not read a muzzle as a face.
+
+    GroundingDINO prompted with "face." fired on the dog and the cat at
+    every threshold tried, which is why a purpose-built detector runs
+    here instead. This is the check that keeps that decision honest.
+    """
+    person = application.analyse_faces(_load("man"))
+    assert len(person.genders) == 1
+    assert len(person.age_bands) == len(person.genders)
+    assert person.is_adult is True
+
+    for animal in ("dog", "cat"):
+        empty = application.analyse_faces(_load(animal))
+        assert empty.genders == (), f"{animal}: {empty.genders}"
+        # No face means vacuously adult, the long-standing contract.
+        assert empty.is_adult is True

@@ -13,7 +13,7 @@ python_version : "3.14"
 
 Prompt-driven image segmentation. Give it an image and any text prompt - get back a binary mask, the cropped region, and a score telling you whether to trust them.
 
-*Powered by GroundingDINO (open-set detection) + SAM 2.1 Hiera-Tiny (mask refinement), both served through `transformers`. Effect-style architecture: explicit capabilities, typed recoverable failures, one composition root.*
+*Powered by GroundingDINO (open-set detection) + SAM 2.1 Hiera-Tiny (mask refinement), with YuNet and two small classifiers behind the optional face analysis - all permissively licensed. Effect-style architecture: explicit capabilities, typed recoverable failures, one composition root.*
 
 ## Example
 
@@ -53,7 +53,6 @@ The first start downloads ~700 MB of weights. `/readyz` answers 503 until they a
 
 ```bash
 poetry install
-poetry install --with person   # For face analysis.
 ENABLE_UI=true poetry run uvicorn app.interfaces.http:create_app \
     --factory --host 0.0.0.0 --port 7860
 ```
@@ -116,7 +115,13 @@ Readiness. `503` until every model is resident, so a container runtime can tell 
 
 - `bbox` is the padded bounding box of the mask in the **original** image's coordinate system.
 - `mask` and `image` are already cropped to `bbox` - align them by drawing at `(bbox.x, bbox.y)`.
-- `person_mode=true` adds a `person` object: `genders` (`0` = Male, `1` = Female, one per face) and `is_adult` (`true` iff every face is ≥ 18).
+- `person_mode=true` adds a `person` object:
+
+```json
+{ "genders": [0], "age_bands": ["sixties"], "is_adult": true }
+```
+
+`is_adult` is **fail-safe**, not merely likely: the age estimator classifies into ranges, and the band from ten to nineteen straddles the threshold, so it never certifies adulthood. `age_bands` is exposed so a caller can apply its own policy.
 
 #### Reliability score
 
@@ -159,6 +164,7 @@ See `.env.template` for the full list. The ones that matter in production:
 | `MAX_IMAGE_PIXELS`      | 40 M    | Decompression-bomb guard.                        |
 | `RATE_LIMIT_REQUESTS`   | 60      | Per client, per window. `0` disables.            |
 | `RELIABILITY_THRESHOLD` | 0.4     | Below this, `reliable` is `false`.               |
+| `FACE_SCORE_THRESHOLD`  | 0.8     | Below this, a detection is not read as a face.   |
 
 ## Architecture
 

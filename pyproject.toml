@@ -40,11 +40,6 @@ anyio = "^4.14.2"
 torch = "^2.13.0"
 torchvision = "^0.28.0"
 
-[tool.poetry.group.person]
-optional = true
-[tool.poetry.group.person.dependencies]
-facelib = { git = "https://github.com/maximedrn/facelib.git" }
-
 [tool.poetry.group.dev.dependencies]
 black = "^26.5.1"
 mypy = "^2.3.1"
@@ -120,10 +115,8 @@ show_error_codes = true
 show_column_numbers = true
 pretty = true
 
-# All previously-untyped modules now have local stubs under ``src/typings``
-# (groundingdino, segment_anything, facelib) or ship types natively 
-# (cv2, PIL, torch, numpy, huggingface_hub). No override needed - mypy 
-# resolves everything through ``mypy_path``.
+# Only gradio still needs a local stub under ``src/typings``; every
+# other dependency ships types natively.
 
 # Pydantic's generated methods expose ``Any`` internally, tripping
 # ``disallow_any_explicit`` on every BaseModel/BaseSettings subclass.
@@ -222,7 +215,6 @@ min-similarity-lines = 8
 [tool.pylint.typecheck]
 ignored-modules = [
     "cv2",
-    "facelib",
     "stone",
 ]
 # Gradio attaches ``click``/``change``/... on components dynamically

@@ -105,8 +105,18 @@ class PersonSchema(BaseModel):
     genders: list[int] = Field(
         ..., description="0 = Male, 1 = Female. One entry per face."
     )
+    age_bands: list[str] = Field(
+        ...,
+        description=(
+            "Estimated age range per face, index-aligned with genders."
+        ),
+    )
     is_adult: bool = Field(
-        ..., description="True iff every detected face is an adult."
+        ...,
+        description=(
+            "True only when no face can be a minor. The band spanning "
+            "the threshold never certifies adulthood."
+        ),
     )
 
     @classmethod
@@ -120,6 +130,7 @@ class PersonSchema(BaseModel):
         """
         return cls(
             genders=[int(gender) for gender in person.genders],
+            age_bands=[band.value for band in person.age_bands],
             is_adult=person.is_adult,
         )
 

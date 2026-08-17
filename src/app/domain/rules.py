@@ -12,7 +12,13 @@ because it needs OpenCV, which the domain should not pull in.
 from numpy import amax, amin, bool_, intp, nonzero, uint8
 from numpy.typing import NDArray
 
-from app.domain.constants import MASK, PERCENTAGE
+from app.domain.constants import (
+    AGE_BAND_FLOOR,
+    MASK,
+    PERCENTAGE,
+    PERSON,
+    AgeBand,
+)
 from app.domain.models import BBox, MaskArray
 
 
@@ -67,6 +73,26 @@ def clamp_percentage(value: float) -> float:
     return min(PERCENTAGE.maximum, max(PERCENTAGE.minimum, value))
 
 
+def certainly_adult(bands: tuple[AgeBand, ...]) -> bool:
+    """Decide whether every detected face is certainly an adult.
+
+    A band certifies adulthood only when its *youngest* possible age
+    already clears the threshold. The band spanning the threshold
+    therefore never certifies, which makes the answer fail-safe rather
+    than merely likely - a deliberate tightening over the numeric
+    estimate this replaced.
+
+    An image with no face is vacuously adult, which is the contract the
+    API has always exposed.
+
+    :param bands: One band per detected face.
+    :type bands: tuple[app.domain.constants.AgeBand, ...]
+    :returns: ``True`` when no face can be a minor.
+    :rtype: bool
+    """
+    return all(AGE_BAND_FLOOR[band] >= PERSON.adult_age for band in bands)
+
+
 def is_reliable(confidence: float, threshold: float) -> bool:
     """Decide whether a result clears the reliability bar.
 
@@ -93,6 +119,7 @@ def binarize(mask: MaskArray) -> NDArray[bool_]:
 
 __all__: list[str] = [
     "bbox_from_mask",
+    "certainly_adult",
     "binarize",
     "clamp_percentage",
     "crop_to_bbox",

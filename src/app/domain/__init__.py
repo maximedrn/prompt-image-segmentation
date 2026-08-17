@@ -6,10 +6,12 @@ which is what makes the use cases testable without booting anything.
 """
 
 from app.domain.constants import (
+    AGE_BAND_FLOOR,
     MASK,
     PERCENTAGE,
     PERSON,
     SCORE,
+    AgeBand,
     Gender,
     ImageFormat,
     ImageMode,
@@ -39,6 +41,7 @@ from app.domain.models import (
 )
 from app.domain.rules import (
     bbox_from_mask,
+    certainly_adult,
     binarize,
     clamp_percentage,
     crop_to_bbox,
@@ -46,10 +49,12 @@ from app.domain.rules import (
 )
 
 __all__: list[str] = [
+    "AGE_BAND_FLOOR",
     "MASK",
     "PERCENTAGE",
     "PERSON",
     "SCORE",
+    "AgeBand",
     "BBox",
     "Detection",
     "DeviceExhausted",
@@ -72,6 +77,7 @@ __all__: list[str] = [
     "UnknownBackend",
     "UploadTooLarge",
     "bbox_from_mask",
+    "certainly_adult",
     "binarize",
     "clamp_percentage",
     "clamp_score",

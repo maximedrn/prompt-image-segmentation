@@ -14,6 +14,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from app.application.policies import (
     DetectionPolicy,
+    FacePolicy,
     RateLimitPolicy,
     SegmentationPolicy,
     UploadPolicy,
@@ -57,6 +58,11 @@ class Defaults:
     #: A 40 Mpx image decodes to roughly 120 MB as RGB uint8. Past that
     #: it is a decompression bomb, not a photograph.
     MAX_IMAGE_PIXELS: Final[int] = 40_000_000
+
+    #: YuNet answers on animal faces too. On the bundled examples a
+    #: human scores 0.94 while a dog and a cat score 0.71 and 0.67, so
+    #: this sits between them with margin. Re-measure on real traffic.
+    FACE_SCORE_THRESHOLD: Final[float] = 0.8
 
     RATE_LIMIT_REQUESTS: Final[int] = 60
     RATE_LIMIT_WINDOW_SECONDS: Final[float] = 60.0
@@ -102,6 +108,9 @@ class Settings(BaseSettings):
     )
     reliability_threshold: float = Field(
         default=Defaults.RELIABILITY_THRESHOLD, alias="RELIABILITY_THRESHOLD"
+    )
+    face_score_threshold: float = Field(
+        default=Defaults.FACE_SCORE_THRESHOLD, alias="FACE_SCORE_THRESHOLD"
     )
     max_upload_bytes: int = Field(
         default=Defaults.MAX_UPLOAD_BYTES, alias="MAX_UPLOAD_BYTES"
@@ -174,6 +183,14 @@ class Settings(BaseSettings):
             score_threshold=self.detection_score_threshold,
             text_threshold=self.text_score_threshold,
         )
+
+    def face_policy(self) -> FacePolicy:
+        """Build the tuning the face detector needs.
+
+        :returns: The face policy.
+        :rtype: app.application.policies.FacePolicy
+        """
+        return FacePolicy(score_threshold=self.face_score_threshold)
 
     def upload_policy(self) -> UploadPolicy:
         """Build the ceilings the HTTP boundary applies.

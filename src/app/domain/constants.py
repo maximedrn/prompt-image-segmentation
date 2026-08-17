@@ -33,6 +33,41 @@ class Gender(IntEnum):
     FEMALE = 1
 
 
+@unique
+class AgeBand(StrEnum):
+    """Age ranges an estimator can report.
+
+    Bands, not years: the estimators available under a permissive
+    licence classify into ranges. That costs precision exactly where it
+    matters, because the adult threshold falls *inside* ``TEEN``.
+    """
+
+    INFANT = "infant"
+    CHILD = "child"
+    TEEN = "teen"
+    TWENTIES = "twenties"
+    THIRTIES = "thirties"
+    FORTIES = "forties"
+    FIFTIES = "fifties"
+    SIXTIES = "sixties"
+    SEVENTIES_PLUS = "seventies-plus"
+
+
+#: Youngest age each band can contain. ``TEEN`` spans the adult
+#: threshold, which is why it can never certify adulthood.
+AGE_BAND_FLOOR: Final[dict[AgeBand, int]] = {
+    AgeBand.INFANT: 0,
+    AgeBand.CHILD: 3,
+    AgeBand.TEEN: 10,
+    AgeBand.TWENTIES: 20,
+    AgeBand.THIRTIES: 30,
+    AgeBand.FORTIES: 40,
+    AgeBand.FIFTIES: 50,
+    AgeBand.SIXTIES: 60,
+    AgeBand.SEVENTIES_PLUS: 70,
+}
+
+
 @final
 @dataclass(frozen=True, slots=True)
 class MaskValues:
@@ -71,12 +106,6 @@ class PersonRules:
     """Thresholds and labels of the face-analysis contract."""
 
     adult_age: int = 18
-    #: Label the face estimator uses for male subjects; anything else is
-    #: read as female, which is the estimator's own binary contract.
-    male_label: str = "Male"
-    #: A face stack is (count, height, width, channels); fewer dimensions
-    #: than this means the detector found nothing.
-    face_stack_dimensions: int = 4
 
 
 MASK: Final[MaskValues] = MaskValues()
@@ -86,10 +115,12 @@ PERSON: Final[PersonRules] = PersonRules()
 
 
 __all__: list[str] = [
+    "AGE_BAND_FLOOR",
     "MASK",
     "PERCENTAGE",
     "PERSON",
     "SCORE",
+    "AgeBand",
     "Gender",
     "ImageFormat",
     "ImageMode",

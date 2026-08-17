@@ -29,7 +29,7 @@ visibility and error precision**, not concurrency.
 |---|---|---|
 | `ModelManager` (`SingletonMeta`) | `managers/model_manager.py` | bootstrap-owned adapters |
 | `SegmentationService` (`SingletonMeta`) | `services/segmentation_service.py` | `application/use_cases/segment.py` effect |
-| `PersonService` (`SingletonMeta`) | `services/person_service.py` | `infrastructure/facelib/` adapter |
+| `PersonService` (`SingletonMeta`) | `services/person_service.py` | `infrastructure/faces.py` adapter |
 | `SEGMENTER_FACTORY` | `segmenters/factory.py` | typed mapping built in `bootstrap.py` |
 | `INFERENCE_LOCK` | `managers/model_manager.py` | owned by the adapter that serialises the device |
 | `get_settings()` (`lru_cache`) | `config/settings.py` | loaded once in `bootstrap.py`, narrow policies passed down |
@@ -50,7 +50,7 @@ not a hidden dependency).
 | `RateLimited` | interface policy | yes | yes, after delay | yes |
 | `DeviceExhausted` | detector/refiner adapter | yes | yes, smaller input | yes |
 | `ModelUnavailable` | adapter construction | yes | often | no |
-| `FaceAnalysisUnavailable` | facelib adapter | yes | no | no |
+| `FaceAnalysisUnavailable` | face adapter | yes | no | no |
 | processor-not-loaded | invariant breach | **no — defect** | no | no |
 | duplicate registration | invariant breach | **no — defect** | no | no |
 
@@ -62,7 +62,7 @@ Defects keep raising normally and surface as 500 with telemetry (§10, §13).
 |---|---|---|
 | `ObjectDetector` | `segment` | GroundingDINO via `transformers` |
 | `MaskRefiner` | `segment` | SAM 2.1 Hiera-Tiny via `transformers` |
-| `FaceAnalyser` | `analyse_person` | `facelib` fork (optional extra) |
+| `FaceAnalyser` | `analyse_person` | YuNet + two ViT/SigLIP classifiers |
 | `SegmentationPolicy` | `segment` | frozen value object from settings |
 
 Four capabilities, well inside `supply()`'s nine-argument ceiling.
@@ -82,13 +82,40 @@ Four capabilities, well inside `supply()`'s nine-argument ceiling.
 | Retry/timeout policies | None added: no network call survives in the request path |
 | Validation boundaries | `Prompt.parse`, `decode_image`, `_read_upload`, `Settings` |
 | Type-check status | mypy strict 0, pyright strict 0, pylint 10.00 |
-| Test status | 24 passing, including 5 that need no model at all |
+| Test status | 26 passing, including 6 that need no model at all |
 
 ### Remaining legacy boundaries
 
-None inside `src/app`. The two that remain are external: `facelib`, whose
-absence is normalised at its adapter, and `transformers`, which is only
-partially typed.
+None inside `src/app`. The one that remains is external: `transformers`,
+which is only partially typed.
+
+### The facelib replacement
+
+`facelib` pulled scikit-image, scikit-learn, scipy and tqdm into the tree
+for one optional feature. What replaced it:
+
+| Stage | Model | Size | Licence |
+|---|---|---|---|
+| Detection | YuNet via `cv2.FaceDetectorYN` | 232 KB | MIT |
+| Age | `dima806/fairface_age_image_detection` | 86M params | Apache-2.0 |
+| Gender | `prithivMLmods/Realistic-Gender-Classification` | 93M params | Apache-2.0 |
+
+OpenCV was already a dependency, so detection costs no new runtime.
+
+**A rejected idea, recorded because it was measured.** Reusing the
+already-loaded GroundingDINO with the prompt `"face."` looked elegant -
+zero marginal model. It does not work: it fires on animal faces at every
+prompt and threshold tried (`face.` at 0.4 gives one detection on a dog
+*and* on a cat). YuNet separates cleanly at 0.75 and above, with the
+human face scoring 0.94 against 0.71 and 0.67 for the animals.
+`tests/test_pipeline.py::test_face_analysis_ignores_animals` keeps that
+honest.
+
+**One deliberate behaviour change.** The old estimator returned a numeric
+age, so `>= 18` was a comparison. The replacement classifies into bands,
+and the threshold falls inside one of them. `certainly_adult` therefore
+refuses to certify that band: stricter than before, and visible in the
+type through `AgeBand` rather than hidden in a boolean.
 
 ### Checker concessions, and why they are where they are
 

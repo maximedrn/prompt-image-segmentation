@@ -30,6 +30,14 @@ class DetectionPolicy:
 
 @final
 @dataclass(frozen=True, slots=True)
+class FacePolicy:
+    """Tuning the face detector applies to its own output."""
+
+    score_threshold: float
+
+
+@final
+@dataclass(frozen=True, slots=True)
 class UploadPolicy:
     """Ceilings applied to an inbound image before it is decoded."""
 
@@ -50,6 +58,7 @@ class RateLimitPolicy:
 
 __all__: list[str] = [
     "DetectionPolicy",
+    "FacePolicy",
     "RateLimitPolicy",
     "SegmentationPolicy",
     "UploadPolicy",
