@@ -8,28 +8,37 @@ readme = "README.md"
 packages = [{ include = "app", from = "src" }]
 
 [tool.poetry.dependencies]
-python = "~3.13"
-fastapi = "^0.139.0"
-uvicorn = { extras = ["standard"], version = "^0.50.0" }
-python-multipart = ">=0.0.31,<0.1"
-gradio = "^6.19"
+# 3.14.1 is excluded by torchvision 0.28, so the floor is 3.14.2 rather
+# than a plain `~3.14`.
+python = ">=3.14.2,<3.15"
+fastapi = "^0.141.1"
+uvicorn = { extras = ["standard"], version = "^0.52.3" }
+python-multipart = "^0.0.32"
+gradio = "^6.24"
 jinja2 = "^3.1.6"
-pydantic = "^2.13"
-pydantic-settings = "^2.14"
+pydantic = "^2.13.4"
+pydantic-settings = "^2.15"
 pillow = "^12.3"
-numpy = "^2.5.0"
+numpy = "^2.5.2"
 opencv-python-headless = "^5.0.0"
-requests = "^2.34.0"
-huggingface-hub = "^1.22"
-transformers = "^5.13"
-rf-groundingdino = { git = "https://github.com/roboflow/GroundingDINO.git" }
-segment-anything-py = "1.0.1"
+requests = "^2.34.2"
+huggingface-hub = "^1.27"
+# Ships GroundingDINO and SAM 2.1 natively: no vendored fork, no compiled
+# CUDA kernels, so ROCm / CPU / MPS all run the same code path.
+transformers = "^5.15"
+# Effect abstraction: Effect[Need[T], Error, Result] with explicit
+# capabilities. Pure Python, so it compiles and installs anywhere.
+stateless = "^0.6.1"
+anyio = "^4.14.2"
 # Default PyPI wheels cover: Apple Silicon (MPS), CPU everywhere else.
 # NVIDIA CUDA or AMD ROCm users reinstall torch after `poetry install`
 # from the matching index - see README. Poetry cannot host multiple
 # source-specific variants of the same package in one lock file.
-torch = "^2.12.1"
-torchvision = "^0.27.1"
+#
+# torchvision is required even though nothing here imports it directly:
+# transformers' Sam2ImageProcessor refuses to load without it.
+torch = "^2.13.0"
+torchvision = "^0.28.0"
 
 [tool.poetry.group.person]
 optional = true
@@ -37,30 +46,46 @@ optional = true
 facelib = { git = "https://github.com/maximedrn/facelib.git" }
 
 [tool.poetry.group.dev.dependencies]
-black = "^26.5.0"
-mypy = "^2.1.0"
-pylint = "^4.0.0"
+black = "^26.5.1"
+mypy = "^2.3.1"
+pylint = "^4.0.7"
+# Second opinion on typing, per SKILL.md section 23.
+pyright = "^1.1.411"
 types-requests = "^2.33.0"
-poethepoet = "^0.37.0"
+poethepoet = "^0.48.0"
 pyclean = "^3.1.0"
-pip-audit = "^2.9"
+pip-audit = "^2.10"
+pytest = "^9.1"
+# Required by starlette's TestClient.
+httpx = "^0.28"
+# Compiles the application package to native extension modules.
+nuitka = "^4.1.3"
 
 [build-system]
 requires = ["poetry-core>=1.9.0"]
 build-backend = "poetry.core.masonry.api"
 
 [tool.poe.tasks]
-format = "black src"
+format = "black src tests scripts"
 lint = ["_pylint", "_mypy"]
 _pylint = "pylint src"
 _mypy = "mypy src"
+test = "pytest"
 outdated = "poetry show --outdated --top-level"
 audit = "pip-audit --skip-editable"
 clean = "pyclean . --debris"
 
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src", "."]
+addopts = "-q --strict-markers"
+markers = [
+    "slow: loads the real models and runs inference",
+]
+
 [tool.black]
 line-length = 79
-target-version = ["py313"]
+target-version = ["py314"]
 preview = true
 enable-unstable-feature = [
     "hug_parens_with_braces_and_square_brackets",
@@ -69,7 +94,7 @@ enable-unstable-feature = [
 ]
 
 [tool.mypy]
-python_version = "3.13"
+python_version = "3.14"
 mypy_path = ["src/typings"]
 plugins = ["pydantic.mypy"]
 strict = true
@@ -105,14 +130,14 @@ pretty = true
 # Relax that one code where we actually declare Pydantic models.
 [[tool.mypy.overrides]]
 module = [
-    "app.api.schemas",
-    "app.config.settings",
+    "app.interfaces.http.schemas",
+    "app.settings",
     "app.domain.*",
 ]
 disable_error_code = ["explicit-any"]
 
 [tool.pylint.main]
-py-version = "3.13"
+py-version = "3.14"
 jobs = 0
 recursive = true
 source-roots = ["src"]
@@ -198,8 +223,6 @@ min-similarity-lines = 8
 ignored-modules = [
     "cv2",
     "facelib",
-    "groundingdino",
-    "segment_anything",
     "stone",
 ]
 # Gradio attaches ``click``/``change``/... on components dynamically
@@ -212,3 +235,28 @@ init-import = false
 
 [tool.pylint."deprecated builtins"]
 bad-functions = ["map", "filter"]
+
+# Second opinion alongside mypy (SKILL.md section 23). Strict
+# everywhere, with one scoped relaxation: `transformers` is only
+# partially typed, so every call into it yields `Unknown`. Rather than
+# scatter ignores, the concession is confined to the adapter package -
+# which is precisely the layer whose job is to face an untyped library.
+# Domain, application and interfaces stay fully strict.
+[tool.pyright]
+include = ["src"]
+extraPaths = ["src", "src/typings"]
+stubPath = "src/typings"
+pythonVersion = "3.14"
+typeCheckingMode = "strict"
+reportMissingTypeStubs = false
+
+[[tool.pyright.executionEnvironments]]
+root = "src/app/infrastructure"
+reportUnknownMemberType = false
+reportUnknownVariableType = false
+reportUnknownArgumentType = false
+reportUnknownParameterType = false
+reportMissingParameterType = false
+
+[[tool.pyright.executionEnvironments]]
+root = "src"

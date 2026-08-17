@@ -1,35 +1,80 @@
-"""Value objects (DTOs).
+"""Domain layer.
 
-Pure data. No I/O, no framework imports, no business logic. Safe to
-import from anywhere without triggering heavy dependencies.
+Value objects, recoverable failures and pure rules. Depends on nothing
+but ``numpy``: importable without a model, a device or a web framework,
+which is what makes the use cases testable without booting anything.
 """
 
-from typing import TypeAlias
-
-from app.domain.bbox import BBox
-from app.domain.person import PersonPayload
-from app.domain.response import SegmentResponse
-from app.domain.segmentation import (
+from app.domain.constants import (
+    MASK,
+    PERCENTAGE,
+    PERSON,
+    SCORE,
+    Gender,
+    ImageFormat,
+    ImageMode,
+)
+from app.domain.errors import (
+    DeviceExhausted,
+    FaceAnalysisUnavailable,
+    ImageDecodeFailed,
+    InvalidPrompt,
+    ModelUnavailable,
+    NoDetection,
+    RateLimited,
+    UnknownBackend,
+    UploadTooLarge,
+)
+from app.domain.models import (
+    BBox,
+    Detection,
     MaskArray,
+    PersonPayload,
+    PixelBox,
+    Prompt,
     SegmentationResult,
+    SegmentedImage,
+    SourceImage,
+    clamp_score,
 )
-
-JSONValue: TypeAlias = (
-    str
-    | int
-    | float
-    | bool
-    | None
-    | list["JSONValue"]
-    | dict[str, "JSONValue"]
+from app.domain.rules import (
+    bbox_from_mask,
+    binarize,
+    clamp_percentage,
+    crop_to_bbox,
+    is_reliable,
 )
-"""What ``model_dump()`` produces: any JSON-serializable value."""
 
 __all__: list[str] = [
+    "MASK",
+    "PERCENTAGE",
+    "PERSON",
+    "SCORE",
     "BBox",
-    "JSONValue",
+    "Detection",
+    "DeviceExhausted",
+    "FaceAnalysisUnavailable",
+    "Gender",
+    "ImageDecodeFailed",
+    "ImageFormat",
+    "ImageMode",
+    "InvalidPrompt",
     "MaskArray",
+    "ModelUnavailable",
+    "NoDetection",
     "PersonPayload",
-    "SegmentResponse",
+    "PixelBox",
+    "Prompt",
+    "RateLimited",
     "SegmentationResult",
+    "SegmentedImage",
+    "SourceImage",
+    "UnknownBackend",
+    "UploadTooLarge",
+    "bbox_from_mask",
+    "binarize",
+    "clamp_percentage",
+    "clamp_score",
+    "crop_to_bbox",
+    "is_reliable",
 ]

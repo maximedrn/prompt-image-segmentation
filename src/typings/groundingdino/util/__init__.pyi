@@ -1,1 +1,0 @@
-"""GroundingDINO shared utilities."""

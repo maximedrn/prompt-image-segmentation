@@ -1,0 +1,100 @@
+"""Pure domain rules.
+
+Deterministic geometry and decisions over masks. No I/O, no device, no
+model: these stay ordinary Python functions rather than effects, because
+they have no requirement and no recoverable failure (``SKILL.md``
+sections 20 and 39).
+
+``numpy`` is the only import: dilation lives in the imaging adapter
+because it needs OpenCV, which the domain should not pull in.
+"""
+
+from numpy import amax, amin, bool_, intp, nonzero, uint8
+from numpy.typing import NDArray
+
+from app.domain.constants import MASK, PERCENTAGE
+from app.domain.models import BBox, MaskArray
+
+
+def bbox_from_mask(mask: MaskArray, padding_percentage: float) -> BBox:
+    """Return the padded bounding box of a mask's foreground.
+
+    :param mask: 2D binary mask; non-zero pixels are foreground.
+    :type mask: app.domain.models.MaskArray
+    :param padding_percentage: Extra margin around the tight box, as a
+        share of the mask's width and height. Clamped to the image.
+    :type padding_percentage: float
+    :returns: The padded box, zero-sized when the mask is blank.
+    :rtype: app.domain.models.BBox
+    """
+    non_zero: tuple[NDArray[intp], ...] = nonzero(mask)
+    if not non_zero[0].size:
+        return BBox(x=0, y=0, width=0, height=0)
+    height, width = mask.shape[:2]
+    ratio: float = clamp_percentage(padding_percentage) / PERCENTAGE.whole
+    pad_x: int = int(width * ratio)
+    pad_y: int = int(height * ratio)
+    x_min: int = max(0, int(amin(non_zero[1])) - pad_x)
+    x_max: int = min(width, int(amax(non_zero[1])) + pad_x)
+    y_min: int = max(0, int(amin(non_zero[0])) - pad_y)
+    y_max: int = min(height, int(amax(non_zero[0])) + pad_y)
+    return BBox(x=x_min, y=y_min, width=x_max - x_min, height=y_max - y_min)
+
+
+def crop_to_bbox(source: NDArray[uint8], bbox: BBox) -> NDArray[uint8]:
+    """Restrict an array to a box, copying when the box is empty.
+
+    :param source: 2D or 3D uint8 array (HxW or HxWxC).
+    :type source: numpy.typing.NDArray[numpy.uint8]
+    :param bbox: Region to keep.
+    :type bbox: app.domain.models.BBox
+    :returns: A view of the region, or a copy when the box is empty.
+    :rtype: numpy.typing.NDArray[numpy.uint8]
+    """
+    if bbox.empty:
+        return source.copy()
+    return source[bbox.y : bbox.bottom, bbox.x : bbox.right]
+
+
+def clamp_percentage(value: float) -> float:
+    """Confine a percentage to the accepted range.
+
+    :param value: Caller-supplied percentage.
+    :type value: float
+    :returns: The percentage confined to ``[0, 100]``.
+    :rtype: float
+    """
+    return min(PERCENTAGE.maximum, max(PERCENTAGE.minimum, value))
+
+
+def is_reliable(confidence: float, threshold: float) -> bool:
+    """Decide whether a result clears the reliability bar.
+
+    :param confidence: Combined confidence of the weakest detection.
+    :type confidence: float
+    :param threshold: Configured minimum.
+    :type threshold: float
+    :returns: ``True`` when the caller can trust the mask.
+    :rtype: bool
+    """
+    return confidence >= threshold
+
+
+def binarize(mask: MaskArray) -> NDArray[bool_]:
+    """Return the boolean foreground of a mask that survived encoding.
+
+    :param mask: Grayscale mask, possibly resampled or PNG round-tripped.
+    :type mask: app.domain.models.MaskArray
+    :returns: Foreground pixels as a boolean array.
+    :rtype: numpy.typing.NDArray[numpy.bool_]
+    """
+    return mask > MASK.threshold
+
+
+__all__: list[str] = [
+    "bbox_from_mask",
+    "binarize",
+    "clamp_percentage",
+    "crop_to_bbox",
+    "is_reliable",
+]
