@@ -40,8 +40,7 @@ Metal has no Docker profile because Docker Desktop for macOS exposes no GPU to c
 
 ```bash
 cp .env.template .env
-# AUTH_MODE=basic refuses to start without credentials. Set them, or
-# set AUTH_MODE=none and mean it.
+
 docker compose --profile cuda up --build
 # API:           http://localhost:7860
 # Documentation: http://localhost:7860/docs
@@ -122,81 +121,6 @@ Readiness. `503` until every model is resident, so a container runtime can tell 
 ```
 
 `is_adult` is **fail-safe**, not merely likely: the age estimator classifies into ranges, and the band from ten to nineteen straddles the threshold, so it never certifies adulthood. `age_bands` is exposed so a caller can apply its own policy.
-
-#### Reliability score
-
-Two numbers the models already produce, kept instead of discarded:
-
-| field             | meaning                                             |
-|-------------------|-----------------------------------------------------|
-| `detection_score` | GroundingDINO's confidence that the box matches.    |
-| `mask_score`      | The IoU SAM predicts for the mask it just produced. |
-| `confidence`      | Their product, per detection.                       |
-
-The top-level `confidence` is the **weakest** detection's, because the returned mask is their union: one bad member contaminates the result. `reliable` compares it against `RELIABILITY_THRESHOLD`.
-
-Logging the distribution of `confidence` in production is the cheapest measure of detection reliability there is - it needs no labelled data.
-
-### Errors
-
-Every failure shares one envelope, so a client branches on `error` and never parses `message`.
-
-```json
-{ "error": "invalid_prompt",      "message": "..." }  // 422
-{ "error": "no_detection",        "message": "..." }  // 422
-{ "error": "unknown_backend",     "message": "..." }  // 400
-{ "error": "out_of_memory",       "message": "..." }  // 503
-{ "error": "unavailable_feature", "message": "..." }  // 501
-{ "error": "internal",            "message": "..." }  // 500
-```
-
-Plus `413` past `MAX_UPLOAD_BYTES` and `429` past the rate limit, the latter with a `Retry-After` header.
-
-## Configuration
-
-See `.env.template` for the full list. The ones that matter in production:
-
-| variable                | default | purpose                                          |
-|-------------------------|---------|--------------------------------------------------|
-| `AUTH_MODE`             | `basic` | `basic` refuses to start without credentials.    |
-| `ENABLE_UI`             | `false` | Mount the Gradio UI.                             |
-| `MAX_UPLOAD_BYTES`      | 20 MiB  | Uvicorn enforces no body limit of its own.       |
-| `MAX_IMAGE_PIXELS`      | 40 M    | Decompression-bomb guard.                        |
-| `RATE_LIMIT_REQUESTS`   | 60      | Per client, per window. `0` disables.            |
-| `RELIABILITY_THRESHOLD` | 0.4     | Below this, `reliable` is `false`.               |
-| `FACE_SCORE_THRESHOLD`  | 0.8     | Below this, a detection is not read as a face.   |
-
-## Architecture
-
-```
-src/app/
-├─ domain/          value objects, typed failures, pure rules
-├─ application/     capabilities (Protocols), effects, use cases
-├─ infrastructure/  the only modules importing transformers or OpenCV
-├─ interfaces/      HTTP transport and the optional Gradio UI
-└─ bootstrap.py     the one place adapters are constructed
-```
-
-An operation states what it needs, how it can fail, and what it returns:
-
-```python
-type SegmentEffect = Effect[
-    Need[ObjectDetector] | Need[MaskRefiner] | Need[MaskDilator]
-    | Need[SegmentationPolicy],
-    NoDetection | DeviceExhausted,
-    SegmentedImage,
-]
-```
-
-Recoverable failures travel the effect's error channel and reach the
-transport as **values**, so routes map them with a `match` rather than a
-`try`. Defects raise normally and surface as 500 with telemetry.
-
-Because capabilities are `Protocol`s, the use case runs against fakes with
-no model loaded and no monkeypatching - see `tests/test_use_case.py`.
-
-`docs/effect-migration.md` records the error taxonomy, the capability
-inventory and every checker concession.
 
 ## Commands
 
