@@ -7,7 +7,7 @@ failure type lives with the transport rather than in
 
 from dataclasses import dataclass
 from secrets import compare_digest
-from typing import final
+from typing import Annotated, final
 
 from fastapi import Depends, Request
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
@@ -16,6 +16,9 @@ from app.interfaces.http.constants import MESSAGE
 from app.settings import Settings
 
 _SECURITY: HTTPBasic = HTTPBasic(auto_error=False)
+
+type Credentials = Annotated[HTTPBasicCredentials | None, Depends(_SECURITY)]
+"""What FastAPI parses out of the ``Authorization`` header."""
 
 
 @final
@@ -28,7 +31,7 @@ class Unauthorized(Exception):
 
 def require_credentials(
     request: Request,
-    credentials: HTTPBasicCredentials | None = Depends(_SECURITY),
+    credentials: Credentials,
 ) -> None:
     """Validate Basic credentials; a no-op when auth is disabled.
 

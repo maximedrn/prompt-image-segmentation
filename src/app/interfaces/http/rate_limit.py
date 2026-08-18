@@ -52,6 +52,8 @@ class FixedWindowLimiter:
         """
         now: float = monotonic()
         with self._lock:
+            count: int
+            ends_at: float
             count, ends_at = self._windows.get(key, _EMPTY_WINDOW)
             if ends_at <= now:
                 count, ends_at = 0, now + self._policy.window_seconds

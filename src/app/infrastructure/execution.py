@@ -17,7 +17,7 @@ repeated per adapter:
 from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from threading import Lock
-from typing import Final, TypeVar
+from typing import Final
 
 from torch import OutOfMemoryError, inference_mode
 from torch.cuda import empty_cache, is_available as cuda_is_available
@@ -26,20 +26,19 @@ from transformers import PreTrainedModel
 from app.domain import DeviceExhausted, ModelUnavailable
 from app.infrastructure.device import autocast_context, get_device
 
-_ModelT = TypeVar("_ModelT", bound=PreTrainedModel)
-_ArtefactT = TypeVar("_ArtefactT")
 
-
-def fetching(model: str, build: Callable[[], _ArtefactT]) -> _ArtefactT:
+def fetching[ArtefactT](
+    model: str, build: Callable[[], ArtefactT]
+) -> ArtefactT:
     """Build one model artefact, normalising every fault into one failure.
 
     :param model: Repository identifier, for the failure detail.
     :type model: str
     :param build: Zero-argument builder, usually a bound
         ``from_pretrained`` closed over its arguments.
-    :type build: collections.abc.Callable[[], _ArtefactT]
+    :type build: collections.abc.Callable[[], ArtefactT]
     :returns: Whatever the builder produced.
-    :rtype: _ArtefactT
+    :rtype: ArtefactT
     :raises app.domain.errors.ModelUnavailable: On any fetch or build
         fault - network, disk or checkpoint - because they all mean
         the same thing here: this capability cannot serve.
@@ -50,7 +49,7 @@ def fetching(model: str, build: Callable[[], _ArtefactT]) -> _ArtefactT:
         raise ModelUnavailable(model=model, detail=str(error)) from error
 
 
-def place(model: _ModelT) -> _ModelT:
+def place[ModelT: PreTrainedModel](model: ModelT) -> ModelT:
     """Move a freshly built model onto the device, in inference mode.
 
     The ignores cover a ``transformers`` stub artefact: ``to()`` and
@@ -58,11 +57,11 @@ def place(model: _ModelT) -> _ModelT:
     functions, so it reads the device argument as ``self``.
 
     :param model: A freshly built model, still on the host.
-    :type model: _ModelT
+    :type model: ModelT
     :returns: The same model, device-placed and frozen for inference.
-    :rtype: _ModelT
+    :rtype: ModelT
     """
-    placed: _ModelT = model.to(get_device())  # type: ignore[arg-type]
+    placed: ModelT = model.to(get_device())  # type: ignore[arg-type]
     # torch's evaluation-mode switch, which disables dropout and freezes
     # batch-norm statistics. Unrelated to the Python builtin of the same
     # name: it evaluates no code.

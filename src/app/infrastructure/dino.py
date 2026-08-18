@@ -7,9 +7,14 @@ only two modules allowed to import ``transformers``.
 from functools import partial
 from typing import final
 
+from torch import Tensor, device as TorchDevice, dtype as TorchDtype
 from transformers import (
+    BatchFeature,
     GroundingDinoForObjectDetection,
     GroundingDinoProcessor,
+)
+from transformers.models.grounding_dino.modeling_grounding_dino import (
+    GroundingDinoObjectDetectionOutput,
 )
 
 from app.application.policies import DetectionPolicy
@@ -89,24 +94,25 @@ class GroundingDinoDetector:
         with exclusive_device(_OPERATION):
             # transformers declares the processor's extra arguments
             # through **kwargs upstream, so pyright cannot see them.
-            # transformers declares the processor's extra arguments
-            # through **kwargs upstream, so pyright cannot see them.
-            fmt = TensorFormat.PYTORCH
-            inputs = self._processor(
+            fmt: TensorFormat = TensorFormat.PYTORCH
+            inputs: BatchFeature = self._processor(
                 images=image.pixels,
                 text=_caption(prompt),
                 return_tensors=fmt,  # pyright: ignore[reportCallIssue]
             )
-            device, dtype = get_device(), get_model_dtype()
+            device: TorchDevice = get_device()
+            dtype: TorchDtype = get_model_dtype()
             inputs = inputs.to(device, dtype)
-            outputs = self._model(**inputs)
-            detected = self._processor.post_process_grounded_object_detection(
-                outputs,
-                inputs["input_ids"],
-                threshold=self._policy.score_threshold,
-                text_threshold=self._policy.text_threshold,
-                target_sizes=[(image.height, image.width)],
-            )[_FIRST_IMAGE]
+            outputs: GroundingDinoObjectDetectionOutput = self._model(**inputs)
+            detected: dict[str, Tensor] = (
+                self._processor.post_process_grounded_object_detection(
+                    outputs,
+                    inputs["input_ids"],
+                    threshold=self._policy.score_threshold,
+                    text_threshold=self._policy.text_threshold,
+                    target_sizes=[(image.height, image.width)],
+                )[_FIRST_IMAGE]
+            )
             box_values: list[list[float]] = (
                 detected["boxes"].float().cpu().tolist()
             )

@@ -34,7 +34,7 @@ jobs:
           poetry run mypy src
           poetry run pyright
       - name: Lint
-        run: poetry run pylint src
+        run: poetry run pylint src tests scripts
       - name: Spelling
         run: npx --yes cspell --no-progress "src/**/*.py" "tests/**/*.py" "*.md"
       # The slow suite loads several hundred megabytes of weights; it runs

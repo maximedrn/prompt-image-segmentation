@@ -5,6 +5,7 @@ stays importable by the use cases without a cycle: this module knows
 both, neither knows this one.
 """
 
+from stateless.handler import Handler
 from stateless.need import supply
 
 from app.application.capabilities import (
@@ -14,6 +15,7 @@ from app.application.capabilities import (
 )
 from app.application.effects import (
     CaughtSegment,
+    SegmentAbilities,
     WiredSegment,
     catch_segment_failures,
 )
@@ -45,7 +47,9 @@ def wire_segment(
     """
     # pyright cannot see that supply() eliminates the Need abilities,
     # because the match is structural rather than nominal.
-    handler = supply(detector, refiner, dilator, policy)
+    handler: Handler[SegmentAbilities] = supply(
+        detector, refiner, dilator, policy
+    )
     supplied: WiredSegment = handler(
         segment
     )  # pyright: ignore[reportArgumentType]

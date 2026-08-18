@@ -7,15 +7,25 @@ model keeps only the image subset, which is both what this service needs
 and several hundred megabytes cheaper than the memory bank.
 """
 
+from collections.abc import Callable
 from functools import partial
 from typing import final
 
-from numpy import any as array_any, uint8
+from numpy import any as array_any, bool_, uint8
 from numpy.typing import NDArray
-from torch import Tensor
-from transformers import Sam2Model, Sam2Processor
+from torch import Tensor, device as TorchDevice, dtype as TorchDtype
+from transformers import BatchFeature, Sam2Model, Sam2Processor
+from transformers.models.sam2.modeling_sam2 import (
+    Sam2ImageSegmentationOutput,
+)
 
-from app.domain import MASK, MaskArray, PixelBox, SourceImage
+from app.domain import (
+    MASK,
+    MaskArray,
+    ModelUnavailable,
+    PixelBox,
+    SourceImage,
+)
 from app.infrastructure.constants import REFINER, SAM, TensorFormat
 from app.infrastructure.device import get_device, get_model_dtype
 from app.infrastructure.execution import exclusive_device, fetching, place
@@ -54,6 +64,8 @@ class Sam2MaskRefiner:
         :rtype: tuple[app.domain.models.MaskArray, tuple[float, ...]]
         :raises app.domain.errors.DeviceExhausted: On accelerator
             out-of-memory.
+        :raises app.domain.errors.ModelUnavailable: If the checkpoint
+            answers without masks, which makes its output meaningless.
         """
         # One critical section for the whole device pass, post-processing
         # included: it runs torch ops on device tensors too, and letting
@@ -61,32 +73,53 @@ class Sam2MaskRefiner:
         with exclusive_device(_OPERATION):
             # transformers declares the processor's extra arguments
             # through **kwargs upstream, so pyright cannot see them.
-            boxed = [[list(box.as_tuple()) for box in boxes]]
-            inputs = self._processor(
-                images=image.pixels,
-                input_boxes=boxed,  # pyright: ignore[reportCallIssue]
-                return_tensors=TensorFormat.PYTORCH,
+            boxed: list[list[list[float]]] = [
+                [list(box.as_tuple()) for box in boxes]
+            ]
+            # Declared as ``BatchEncoding`` upstream, but the image
+            # processor it delegates to returns a ``BatchFeature`` -
+            # which is the class whose ``to()`` takes a dtype below.
+            inputs: BatchFeature = (
+                self._processor(  # pyright: ignore[reportAssignmentType]
+                    images=image.pixels,
+                    input_boxes=boxed,  # pyright: ignore[reportCallIssue]
+                    return_tensors=TensorFormat.PYTORCH,
+                )
             )
             # BatchFeature.to(device, dtype) casts only the floating
             # point entries, leaving input ids intact. The declared
             # overload takes one positional argument.
-            device, dtype = get_device(), get_model_dtype()
+            device: TorchDevice = get_device()
+            dtype: TorchDtype = get_model_dtype()
             inputs = inputs.to(
                 device, dtype  # pyright: ignore[reportCallIssue]
             )
-            outputs = self._model(
+            outputs: Sam2ImageSegmentationOutput = self._model(
                 **inputs, multimask_output=REFINER.multimask_output
             )
+            predicted: Tensor | None = outputs.pred_masks
+            quality: Tensor | None = outputs.iou_scores
+            if predicted is None or quality is None:
+                raise ModelUnavailable(
+                    model=SAM.repository,
+                    detail="The refiner returned no mask.",
+                )
             # Carries no annotations upstream.
-            restore = self._processor.post_process_masks
-            restored: list[Tensor] = restore(  # type: ignore[no-untyped-call]
-                outputs.pred_masks, inputs["original_sizes"]
+            restore: Callable[[Tensor, Tensor], list[Tensor]] = (
+                self._processor.post_process_masks
             )
-            stacked = restored[_FIRST_IMAGE].cpu().numpy().astype(bool)
+            restored: list[Tensor] = restore(
+                predicted, inputs["original_sizes"]
+            )
+            stacked: NDArray[bool_] = (
+                restored[_FIRST_IMAGE].cpu().numpy().astype(bool)
+            )
             scores: tuple[float, ...] = tuple(
-                outputs.iou_scores.float().flatten().tolist()
+                quality.float().flatten().tolist()
             )
         # (num_boxes, num_masks, H, W) collapses to a single (H, W) union.
+        height: int
+        width: int
         height, width = stacked.shape[-2:]
         union: NDArray[uint8] = (
             array_any(stacked.reshape(-1, height, width), axis=0)

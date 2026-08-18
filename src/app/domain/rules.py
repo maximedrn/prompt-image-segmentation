@@ -36,6 +36,8 @@ def bbox_from_mask(mask: MaskArray, padding_percentage: float) -> BBox:
     non_zero: tuple[NDArray[intp], ...] = nonzero(mask)
     if not non_zero[0].size:
         return BBox(x=0, y=0, width=0, height=0)
+    height: int
+    width: int
     height, width = mask.shape[:2]
     ratio: float = clamp_percentage(padding_percentage) / PERCENTAGE.whole
     pad_x: int = int(width * ratio)
@@ -119,8 +121,8 @@ def binarize(mask: MaskArray) -> NDArray[bool_]:
 
 __all__: list[str] = [
     "bbox_from_mask",
-    "certainly_adult",
     "binarize",
+    "certainly_adult",
     "clamp_percentage",
     "crop_to_bbox",
     "is_reliable",

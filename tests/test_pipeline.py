@@ -8,24 +8,43 @@ The fake-capability tests live in ``test_use_case.py``: those need no
 model at all, which is the point.
 """
 
+# pytest collects the test functions by name; nothing in the module
+# calls them, which is what ``allow-global-unused-variables`` flags.
+# pylint: disable=unused-variable
+
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Final
 
 import numpy as np
 import pytest
+from numpy import bool_, intp
+from numpy.typing import NDArray
 from PIL import Image as PilImage
+from PIL.Image import Image
+from pytest import MarkDecorator
 
 from app.bootstrap import Application, SegmentOutcome, build
-from app.domain import BBox, Prompt, SegmentedImage, SourceImage, binarize
+from app.domain import (
+    BBox,
+    ImageMode,
+    PersonPayload,
+    Prompt,
+    SegmentedImage,
+    SourceImage,
+    binarize,
+)
 from app.settings import AuthMode, Settings
 
 EXAMPLES: Final[Path] = Path(__file__).resolve().parents[1] / "examples"
 #: Reference masks come from the previous SAM ViT-H pipeline, so this
 #: doubles as the migration's regression gate.
 MINIMUM_IOU: Final[float] = 0.85
+#: Enough overlap to interleave, small enough to stay quick.
+WORKERS: Final[int] = 4
+REQUESTS: Final[int] = 8
 
-pytestmark = pytest.mark.slow
+pytestmark: MarkDecorator = pytest.mark.slow
 
 
 @pytest.fixture(name="application", scope="module")
@@ -52,7 +71,9 @@ def _load(name: str) -> SourceImage:
     :returns: The decoded image.
     :rtype: app.domain.models.SourceImage
     """
-    opened = PilImage.open(EXAMPLES / f"{name}-original.png").convert("RGB")
+    opened: Image = PilImage.open(EXAMPLES / f"{name}-original.png").convert(
+        ImageMode.RGB
+    )
     return SourceImage(pixels=np.array(opened, dtype=np.uint8))
 
 
@@ -88,19 +109,26 @@ def test_masks_match_the_reference_pipeline(
     application: Application, name: str, prompt: str
 ) -> None:
     """SAM 2.1-tiny reproduces what SAM ViT-H used to produce."""
-    produced = binarize(_segment(application, name, prompt).cropped_mask)
-    reference_image = PilImage.open(EXAMPLES / f"{name}-mask.png").convert("L")
+    produced: NDArray[bool_] = binarize(
+        _segment(application, name, prompt).cropped_mask
+    )
+    reference_image: Image = PilImage.open(
+        EXAMPLES / f"{name}-mask.png"
+    ).convert(ImageMode.GRAYSCALE)
     # Both masks are cropped to their own padded bbox; putting the
     # reference on the new crop's grid is what makes them comparable.
-    reference = binarize(
+    reference: NDArray[bool_] = binarize(
         np.array(
             reference_image.resize(
-                (produced.shape[1], produced.shape[0]), PilImage.NEAREST
+                (produced.shape[1], produced.shape[0]),
+                PilImage.Resampling.NEAREST,
             )
         )
     )
-    union = np.logical_or(reference, produced).sum()
-    iou = float(np.logical_and(reference, produced).sum()) / max(union, 1)
+    union: intp = np.logical_or(reference, produced).sum()
+    iou: float = float(np.logical_and(reference, produced).sum()) / max(
+        union, 1
+    )
     assert iou >= MINIMUM_IOU, f"{name}: IoU {iou:.3f} < {MINIMUM_IOU}"
 
 
@@ -142,12 +170,19 @@ def test_concurrent_requests_do_not_cross_over(
         :returns: The case name and the box it produced.
         :rtype: tuple[str, app.domain.models.BBox]
         """
+        name: str
+        prompt: str
         name, prompt = cases[index % len(cases)]
         return name, _segment(application, name, prompt).bbox
 
-    with ThreadPoolExecutor(max_workers=4) as pool:
-        results = list(pool.map(run_one, range(8)))
+    pool: ThreadPoolExecutor
+    with ThreadPoolExecutor(max_workers=WORKERS) as pool:
+        results: list[tuple[str, BBox]] = list(
+            pool.map(run_one, range(REQUESTS))
+        )
 
+    name: str
+    bbox: BBox
     for name, bbox in results:
         assert bbox == expected[name], (
             f"{name} came back with another image's mask: "
@@ -162,13 +197,13 @@ def test_face_analysis_ignores_animals(application: Application) -> None:
     every threshold tried, which is why a purpose-built detector runs
     here instead. This is the check that keeps that decision honest.
     """
-    person = application.analyse_faces(_load("man"))
+    person: PersonPayload = application.analyse_faces(_load("man"))
     assert len(person.genders) == 1
     assert len(person.age_bands) == len(person.genders)
     assert person.is_adult is True
 
     for animal in ("dog", "cat"):
-        empty = application.analyse_faces(_load(animal))
+        empty: PersonPayload = application.analyse_faces(_load(animal))
         assert empty.genders == (), f"{animal}: {empty.genders}"
         # No face means vacuously adult, the long-standing contract.
         assert empty.is_adult is True

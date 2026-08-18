@@ -5,17 +5,27 @@ the upload reader, so the suite stays fast. The transport is built
 without running the lifespan, which is what keeps the weights out of it.
 """
 
+# pytest collects the test functions by name; nothing in the module
+# calls them, which is what ``allow-global-unused-variables`` flags.
+# pylint: disable=unused-variable
+
+from http import HTTPStatus
 from io import BytesIO
 from typing import Final
 
 import pytest
-from PIL import Image as PilImage
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from httpx import Response
+from PIL import Image as PilImage
 
 from app.interfaces.http.application import create_app
-from app.interfaces.http.constants import ErrorCode
+from app.interfaces.http.constants import (
+    HEADER,
+    ROUTE,
+    ErrorCode,
+    HealthState,
+)
 from app.settings import AuthMode, Settings
 from tests.conftest import PASSWORD, USERNAME
 
@@ -90,7 +100,7 @@ def _post(
     :rtype: httpx.Response
     """
     return client.post(
-        "/segment",
+        ROUTE.segment,
         files={"image": ("input.png", payload, "image/png")},
         data={"prompt": "dog"},
         auth=auth,
@@ -99,27 +109,29 @@ def _post(
 
 def test_liveness_needs_no_auth(client: TestClient) -> None:
     """Liveness must answer for the container runtime."""
-    response: Response = client.get("/healthz")
-    assert response.status_code == 200
-    assert response.json()["status"] == "ok"
+    response: Response = client.get(ROUTE.health)
+    assert response.status_code == HTTPStatus.OK
+    assert response.json()["status"] == HealthState.OK
 
 
 def test_readiness_is_503_before_the_lifespan_runs(
     client: TestClient,
 ) -> None:
     """Readiness keeps traffic away while nothing is wired yet."""
-    response: Response = client.get("/readyz")
-    assert response.status_code == 503
+    response: Response = client.get(ROUTE.ready)
+    assert response.status_code == HTTPStatus.SERVICE_UNAVAILABLE
     assert response.json()["error"] == ErrorCode.NOT_READY
 
 
 def test_segment_requires_credentials(client: TestClient) -> None:
     """The API is closed without valid Basic credentials."""
-    assert _post(client, _png(), auth=None).status_code == 401
+    assert (
+        _post(client, _png(), auth=None).status_code == HTTPStatus.UNAUTHORIZED
+    )
     unauthorized: Response = _post(client, _png(), auth=("wrong", "wrong"))
-    assert unauthorized.status_code == 401
+    assert unauthorized.status_code == HTTPStatus.UNAUTHORIZED
     assert unauthorized.json()["error"] == ErrorCode.UNAUTHORIZED
-    assert "WWW-Authenticate" in unauthorized.headers
+    assert HEADER.authenticate in unauthorized.headers
 
 
 def test_oversized_upload_is_refused(client: TestClient) -> None:
@@ -127,21 +139,21 @@ def test_oversized_upload_is_refused(client: TestClient) -> None:
     response: Response = _post(
         client, b"\x89PNG\r\n\x1a\n" + b"\x00" * (UPLOAD_LIMIT * 2)
     )
-    assert response.status_code == 413
+    assert response.status_code == HTTPStatus.CONTENT_TOO_LARGE
     assert response.json()["error"] == ErrorCode.UPLOAD_TOO_LARGE
 
 
 def test_empty_upload_is_refused(client: TestClient) -> None:
     """An empty body is a client error, not a traceback."""
     response: Response = _post(client, b"")
-    assert response.status_code == 422
+    assert response.status_code == HTTPStatus.UNPROCESSABLE_CONTENT
     assert response.json()["error"] == ErrorCode.INVALID_IMAGE
 
 
 def test_undecodable_upload_is_refused(client: TestClient) -> None:
     """Bytes Pillow cannot open yield 422 rather than a 500."""
     response: Response = _post(client, b"definitely not an image")
-    assert response.status_code == 422
+    assert response.status_code == HTTPStatus.UNPROCESSABLE_CONTENT
     assert response.json()["error"] == ErrorCode.INVALID_IMAGE
 
 
@@ -152,7 +164,7 @@ def test_rate_limit_returns_429_with_retry_after(
     for _ in range(BUDGET):
         _post(client, b"not an image")
     response: Response = _post(client, b"not an image")
-    assert response.status_code == 429
+    assert response.status_code == HTTPStatus.TOO_MANY_REQUESTS
     assert response.json()["error"] == ErrorCode.RATE_LIMITED
     assert int(response.headers["retry-after"]) >= 1
 

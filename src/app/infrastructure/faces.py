@@ -23,24 +23,28 @@ numeric comparison it replaced.
 from typing import Final, final
 
 from cv2 import COLOR_RGB2BGR, FaceDetectorYN, cvtColor
+from cv2.typing import MatLike
 from huggingface_hub import hf_hub_download
 from numpy import uint8
 from numpy.typing import NDArray
+from torch import device as TorchDevice, dtype as TorchDtype
 from transformers import (
+    BatchFeature,
     SiglipForImageClassification,
     SiglipImageProcessor,
     ViTForImageClassification,
     ViTImageProcessor,
 )
+from transformers.modeling_outputs import ImageClassifierOutput
 
 from app.application.policies import FacePolicy
 from app.domain import (
     AgeBand,
-    certainly_adult,
     Gender,
     ModelUnavailable,
     PersonPayload,
     SourceImage,
+    certainly_adult,
 )
 from app.infrastructure.constants import (
     AGE_ESTIMATOR,
@@ -88,12 +92,21 @@ def _winning_label(
     :returns: The winning label.
     :rtype: str
     :raises app.domain.errors.ModelUnavailable: If the checkpoint
-        carries no label mapping, which makes its output meaningless.
+        answers without logits or carries no label mapping, which makes
+        its output meaningless.
     """
-    features = processor(images=crop, return_tensors=TensorFormat.PYTORCH)
-    device, dtype = get_device(), get_model_dtype()
-    outputs = model(**features.to(device, dtype))
-    index: int = int(outputs.logits.float().argmax(-1)[_FIRST_RESULT])
+    features: BatchFeature = processor(
+        images=crop, return_tensors=TensorFormat.PYTORCH
+    )
+    device: TorchDevice = get_device()
+    dtype: TorchDtype = get_model_dtype()
+    outputs: ImageClassifierOutput = model(**features.to(device, dtype))
+    if (logits := outputs.logits) is None:
+        raise ModelUnavailable(
+            model=type(model).__name__,
+            detail="The checkpoint produced no logits.",
+        )
+    index: int = int(logits.float().argmax(-1)[_FIRST_RESULT])
     if (labels := model.config.id2label) is None:
         raise ModelUnavailable(
             model=type(model).__name__,
@@ -156,9 +169,10 @@ class YuNetFaceAnalyser:
         :returns: Crops large enough to classify, possibly empty.
         :rtype: list[numpy.typing.NDArray[numpy.uint8]]
         """
-        bgr = cvtColor(image.pixels, COLOR_RGB2BGR)
+        bgr: MatLike = cvtColor(image.pixels, COLOR_RGB2BGR)
         self._detector.setScoreThreshold(self._policy.score_threshold)
         self._detector.setInputSize((image.width, image.height))
+        detections: MatLike | None
         _, detections = self._detector.detect(bgr)
         # YuNet answers with ``None`` rather than an empty array when
         # it finds nothing - measured, not assumed. The OpenCV stubs
@@ -168,6 +182,10 @@ class YuNetFaceAnalyser:
             return []  # type: ignore[unreachable]
         crops: list[NDArray[uint8]] = []
         for row in detections:
+            left: int
+            top: int
+            width: int
+            height: int
             left, top, width, height = (int(value) for value in row[:4])
             if min(width, height) < FACE.minimum_crop_pixels:
                 continue
@@ -247,13 +265,13 @@ def load_face_analyser(policy: FacePolicy) -> YuNetFaceAnalyser:
             model=FACE_DETECTOR.repository, detail=str(error)
         ) from error
 
-    age_processor = fetching(
+    age_processor: ViTImageProcessor = fetching(
         AGE_ESTIMATOR.repository,
         lambda: ViTImageProcessor.from_pretrained(
             AGE_ESTIMATOR.repository, revision=AGE_ESTIMATOR.revision
         ),
     )
-    age_model = fetching(
+    age_model: ViTForImageClassification = fetching(
         AGE_ESTIMATOR.repository,
         lambda: ViTForImageClassification.from_pretrained(
             AGE_ESTIMATOR.repository,
@@ -261,14 +279,14 @@ def load_face_analyser(policy: FacePolicy) -> YuNetFaceAnalyser:
             dtype=get_model_dtype(),
         ),
     )
-    gender_processor = fetching(
+    gender_processor: SiglipImageProcessor = fetching(
         GENDER_ESTIMATOR.repository,
         lambda: SiglipImageProcessor.from_pretrained(
             GENDER_ESTIMATOR.repository,
             revision=GENDER_ESTIMATOR.revision,
         ),
     )
-    gender_model = fetching(
+    gender_model: SiglipForImageClassification = fetching(
         GENDER_ESTIMATOR.repository,
         lambda: SiglipForImageClassification.from_pretrained(
             GENDER_ESTIMATOR.repository,

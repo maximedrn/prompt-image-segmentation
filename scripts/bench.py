@@ -20,7 +20,6 @@ from time import monotonic
 
 _PROCESS_START: float = monotonic()
 
-# pylint: disable=wrong-import-position
 import argparse
 import json
 import os
@@ -29,7 +28,12 @@ import subprocess
 import sys
 from math import ceil
 from pathlib import Path
-from typing import Any, Final
+from typing import TYPE_CHECKING, Any, Final, NamedTuple
+
+if TYPE_CHECKING:
+    from torch import device as TorchDevice
+
+    from app.bootstrap import Application
 
 _PROJECT_ROOT: Final[Path] = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_PROJECT_ROOT / "src"))
@@ -37,6 +41,10 @@ sys.path.insert(0, str(_PROJECT_ROOT / "src"))
 _SCHEMA_VERSION: Final[int] = 1
 _TARGET_BYTES: Final[int] = 1024**3
 _MIB: Final[int] = 1024**2
+#: getrusage reports bytes on this platform and kilobytes on Linux.
+_MACOS: Final[str] = "darwin"
+#: ``pid, used_gpu_memory``, the two columns queried below.
+_SMI_FIELDS: Final[int] = 2
 
 # Prompts mirror the README example table.
 _SAMPLES: Final[tuple[tuple[str, str], ...]] = (
@@ -44,6 +52,14 @@ _SAMPLES: Final[tuple[tuple[str, str], ...]] = (
     ("cat-original.png", "cat"),
     ("man-original.png", "costume. glasses"),
 )
+
+
+class Measurement(NamedTuple):
+    """What running the samples produced."""
+
+    durations: list[float]
+    failures: list[dict[str, str]]
+    first_mask_seconds: float | None
 
 
 def _percentile(values: list[float], fraction: float) -> float:
@@ -70,8 +86,7 @@ def _host_peak_bytes() -> int:
     :rtype: int
     """
     peak: int = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
-    # getrusage reports bytes on macOS but kilobytes on Linux.
-    return peak if sys.platform == "darwin" else peak * 1024
+    return peak if sys.platform == _MACOS else peak * 1024
 
 
 def _nvidia_smi_bytes() -> int | None:
@@ -84,7 +99,7 @@ def _nvidia_smi_bytes() -> int | None:
     :rtype: int | None
     """
     try:
-        completed = subprocess.run(
+        completed: subprocess.CompletedProcess[str] = subprocess.run(
             [
                 "nvidia-smi",
                 "--query-compute-apps=pid,used_gpu_memory",
@@ -100,74 +115,96 @@ def _nvidia_smi_bytes() -> int | None:
     pid: str = str(os.getpid())
     for line in completed.stdout.splitlines():
         fields: list[str] = [field.strip() for field in line.split(",")]
-        if len(fields) == 2 and fields[0] == pid and fields[1].isdigit():
+        if (
+            len(fields) == _SMI_FIELDS
+            and fields[0] == pid
+            and fields[1].isdigit()
+        ):
             return int(fields[1]) * _MIB
     return None
 
 
-def main() -> int:
-    """Run the benchmark and emit the report.
+# Every deferred import below is deferred for the same reason as the ones
+# at the top of the module: the clock must not include them twice.
+# pylint: disable=import-outside-toplevel
 
-    :returns: ``0`` when every sample succeeded, ``1`` otherwise.
-    :rtype: int
+
+def _peak_device_bytes(device: TorchDevice) -> int | None:
+    """Peak device memory the torch allocator knows about.
+
+    :param device: The device the pipeline runs on.
+    :type device: torch.device
+    :returns: Bytes, or ``None`` on CPU where the notion is host RSS.
+    :rtype: int | None
     """
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--runs", type=int, default=3)
-    parser.add_argument("--output", type=Path, default=None)
-    parser.add_argument("--prompt", type=str, default=None)
-    arguments = parser.parse_args()
+    import torch
 
-    import numpy  # noqa: PLC0415
-    import torch  # noqa: PLC0415
-    from PIL import Image  # noqa: PLC0415
+    from app.infrastructure.constants import DeviceType
 
-    from app.bootstrap import build  # noqa: PLC0415
-    from app.domain import Prompt, SourceImage  # noqa: PLC0415
-    from app.infrastructure.device import get_device  # noqa: PLC0415
-    from app.settings import AuthMode, Settings  # noqa: PLC0415
+    if device.type == DeviceType.CUDA:
+        return int(torch.cuda.max_memory_allocated(device))
+    if device.type == DeviceType.MPS:
+        return int(torch.mps.driver_allocated_memory())
+    return None
 
-    import_seconds: float = monotonic() - _PROCESS_START
-    device = get_device()
 
-    def peak_device_bytes() -> int | None:
-        """Peak device memory the torch allocator knows about.
+def _load_application() -> tuple[Application, float]:
+    """Build the wired application, timing the load.
 
-        :returns: Bytes, or ``None`` on CPU where the notion is host RSS.
-        :rtype: int | None
-        """
-        if device.type == "cuda":
-            return int(torch.cuda.max_memory_allocated(device))
-        if device.type == "mps":
-            return int(torch.mps.driver_allocated_memory())
-        return None
+    :returns: The application and how long building it took.
+    :rtype: tuple[app.bootstrap.Application, float]
+    """
+    from app.bootstrap import build
+    from app.settings import AuthMode, Settings
 
-    if device.type == "cuda":
-        torch.cuda.reset_peak_memory_stats(device)
+    started: float = monotonic()
+    application: Application = build(
+        Settings(AUTH_MODE=AuthMode.NONE, _env_file=None)
+    )
+    return application, monotonic() - started
 
-    load_start: float = monotonic()
-    application = build(Settings(AUTH_MODE=AuthMode.NONE, _env_file=None))
-    load_seconds: float = monotonic() - load_start
-    after_load_bytes: int | None = peak_device_bytes()
+
+def _measure(
+    application: Application, runs: int, prompt_override: str | None
+) -> Measurement:
+    """Segment every sample ``runs`` times, surviving bad samples.
+
+    :param application: The wired application.
+    :type application: app.bootstrap.Application
+    :param runs: How many passes over the sample set.
+    :type runs: int
+    :param prompt_override: Prompt to use for every sample, if given.
+    :type prompt_override: str | None
+    :returns: Durations, failures and time to the first mask.
+    :rtype: Measurement
+    """
+    # A benchmark must survive a bad sample and report it.
+    # pylint: disable=broad-except
+    import numpy
+    from PIL import Image
+
+    from app.domain import ImageMode, Prompt, SourceImage
 
     backend: str = application.settings.default_segmenter
     durations: list[float] = []
     failures: list[dict[str, str]] = []
     first_mask_seconds: float | None = None
 
-    for _ in range(arguments.runs):
+    for _ in range(runs):
         for filename, default_prompt in _SAMPLES:
             path: Path = _PROJECT_ROOT / "examples" / filename
             if not path.is_file():
                 failures.append({"sample": filename, "error": "missing"})
                 continue
-            prompt: str = arguments.prompt or default_prompt
-            opened = Image.open(path).convert("RGB")
-            image = SourceImage(pixels=numpy.array(opened, dtype=numpy.uint8))
+            prompt: str = prompt_override or default_prompt
+            opened: Image.Image = Image.open(path).convert(ImageMode.RGB)
+            image: SourceImage = SourceImage(
+                pixels=numpy.array(opened, dtype=numpy.uint8)
+            )
             started: float = monotonic()
             try:
                 application.segment(backend, image, Prompt.parse(prompt), None)
-            # A benchmark must survive a bad sample and report it.
-            except Exception as error:  # pylint: disable=broad-except
+            except Exception as error:  # noqa: BLE001
                 failures.append(
                     {"sample": filename, "error": f"{type(error).__name__}"}
                 )
@@ -176,41 +213,16 @@ def main() -> int:
             if first_mask_seconds is None:
                 first_mask_seconds = monotonic() - _PROCESS_START
 
-    report: dict[str, Any] = {
-        "schema": _SCHEMA_VERSION,
-        "device": str(device),
-        "torch": torch.__version__,
-        "startup": {
-            "import_seconds": round(import_seconds, 3),
-            "load_seconds": round(load_seconds, 3),
-            "first_mask_seconds": (
-                round(first_mask_seconds, 3)
-                if first_mask_seconds is not None
-                else None
-            ),
-        },
-        "memory": {
-            "after_load_device_bytes": after_load_bytes,
-            "peak_device_bytes": peak_device_bytes(),
-            "nvidia_smi_bytes": _nvidia_smi_bytes(),
-            "host_peak_bytes": _host_peak_bytes(),
-        },
-        "latency": {
-            "runs": len(durations),
-            "p50_seconds": round(_percentile(durations, 0.50), 3),
-            "p95_seconds": round(_percentile(durations, 0.95), 3),
-        },
-        "failures": failures,
-    }
+    return Measurement(durations, failures, first_mask_seconds)
 
-    if arguments.output is not None:
-        arguments.output.parent.mkdir(parents=True, exist_ok=True)
-        arguments.output.write_text(json.dumps(report, indent=2) + "\n")
 
-    print(json.dumps(report, indent=2))
+def _verdict(report: dict[str, Any]) -> None:
+    """Print how the run compares with the memory target.
 
-    measured: int | None = report["memory"]["nvidia_smi_bytes"]
-    if measured is not None:
+    :param report: The assembled report.
+    :type report: dict[str, typing.Any]
+    """
+    if (measured := report["memory"]["nvidia_smi_bytes"]) is not None:
         verdict: str = "PASS" if measured < _TARGET_BYTES else "OVER BUDGET"
         print(
             f"\nnvidia-smi: {measured / _MIB:.0f} MiB "
@@ -224,7 +236,73 @@ def main() -> int:
             file=sys.stderr,
         )
 
-    return 1 if failures else 0
+
+def main() -> int:
+    """Run the benchmark and emit the report.
+
+    :returns: ``0`` when every sample succeeded, ``1`` otherwise.
+    :rtype: int
+    """
+    parser: argparse.ArgumentParser = argparse.ArgumentParser(
+        description=__doc__
+    )
+    parser.add_argument("--runs", type=int, default=3)
+    parser.add_argument("--output", type=Path, default=None)
+    parser.add_argument("--prompt", type=str, default=None)
+    arguments: argparse.Namespace = parser.parse_args()
+
+    import torch
+
+    from app.infrastructure.constants import DeviceType
+    from app.infrastructure.device import get_device
+
+    import_seconds: float = monotonic() - _PROCESS_START
+    device: TorchDevice = get_device()
+    if device.type == DeviceType.CUDA:
+        torch.cuda.reset_peak_memory_stats(device)
+
+    application: Application
+    load_seconds: float
+    application, load_seconds = _load_application()
+    after_load_bytes: int | None = _peak_device_bytes(device)
+
+    measured: Measurement = _measure(
+        application, arguments.runs, arguments.prompt
+    )
+    report: dict[str, Any] = {
+        "schema": _SCHEMA_VERSION,
+        "device": str(device),
+        "torch": torch.__version__,
+        "startup": {
+            "import_seconds": round(import_seconds, 3),
+            "load_seconds": round(load_seconds, 3),
+            "first_mask_seconds": (
+                round(measured.first_mask_seconds, 3)
+                if measured.first_mask_seconds is not None
+                else None
+            ),
+        },
+        "memory": {
+            "after_load_device_bytes": after_load_bytes,
+            "peak_device_bytes": _peak_device_bytes(device),
+            "nvidia_smi_bytes": _nvidia_smi_bytes(),
+            "host_peak_bytes": _host_peak_bytes(),
+        },
+        "latency": {
+            "runs": len(measured.durations),
+            "p50_seconds": round(_percentile(measured.durations, 0.50), 3),
+            "p95_seconds": round(_percentile(measured.durations, 0.95), 3),
+        },
+        "failures": measured.failures,
+    }
+
+    if arguments.output is not None:
+        arguments.output.parent.mkdir(parents=True, exist_ok=True)
+        arguments.output.write_text(json.dumps(report, indent=2) + "\n")
+
+    print(json.dumps(report, indent=2))
+    _verdict(report)
+    return 1 if measured.failures else 0
 
 
 if __name__ == "__main__":

@@ -24,8 +24,8 @@ from app.application.capabilities import (
     ObjectDetector,
 )
 from app.application.effects import CaughtSegment, SegmentFailure
-from app.application.wiring import wire_segment
 from app.application.policies import SegmentationPolicy
+from app.application.wiring import wire_segment
 from app.domain import (
     PersonPayload,
     Prompt,

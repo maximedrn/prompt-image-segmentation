@@ -8,23 +8,23 @@ state the routes use.
 from io import BytesIO
 from typing import final
 
-from PIL import Image as PilImage
-from PIL.Image import Image
 from fastapi import FastAPI
 from gradio import (
+    JSON,
     Blocks,
     Button,
     Checkbox,
     Column,
     Dropdown,
     Image as GradioImage,
-    JSON,
     Markdown,
     Row,
     Textbox,
     mount_gradio_app,
 )
 from numpy import array, uint8
+from PIL import Image as PilImage
+from PIL.Image import Image
 
 from app.bootstrap import Application, SegmentOutcome
 from app.domain import (
@@ -39,9 +39,9 @@ from app.domain import (
 from app.infrastructure.imaging import encode_png
 from app.interfaces.http.schemas import SegmentSchema
 from app.interfaces.ui.constants import (
+    COMPONENT,
     LABEL,
     LAYOUT,
-    COMPONENT,
     UI_MESSAGE,
 )
 from app.settings import Settings
@@ -140,6 +140,7 @@ class SegmentationUi:
         :rtype: gradio.Blocks
         """
         default: str = backends[0] if backends else ""
+        blocks: Blocks
         with Blocks(title=LABEL.title, analytics_enabled=False) as blocks:
             Markdown(f"# {LABEL.title}")
             Markdown(LABEL.instructions)

@@ -11,9 +11,9 @@ from http import HTTPStatus
 from logging import Logger, getLogger
 from typing import Final
 
-from PIL import Image as PilImage, ImageFile
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
+from PIL import Image as PilImage, ImageFile
 from starlette.concurrency import run_in_threadpool
 
 from app import __version__
@@ -59,8 +59,8 @@ async def _lifespan(application: FastAPI) -> AsyncGenerator[None]:
         wired: Application = await run_in_threadpool(build, settings)
     # Model loading touches network, disk and driver: none of those may
     # take the process down at boot.
-    except Exception as failure:  # pylint: disable=broad-except
-        _LOGGER.exception("Startup failed, staying unready: %s", failure)
+    except Exception:  # pylint: disable=broad-except
+        _LOGGER.exception("Startup failed, staying unready")
     else:
         application.state.application = wired
     yield

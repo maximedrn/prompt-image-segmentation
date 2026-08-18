@@ -41,8 +41,8 @@ from app.domain.models import (
 )
 from app.domain.rules import (
     bbox_from_mask,
-    certainly_adult,
     binarize,
+    certainly_adult,
     clamp_percentage,
     crop_to_bbox,
     is_reliable,
@@ -77,8 +77,8 @@ __all__: list[str] = [
     "UnknownBackend",
     "UploadTooLarge",
     "bbox_from_mask",
-    "certainly_adult",
     "binarize",
+    "certainly_adult",
     "clamp_percentage",
     "clamp_score",
     "crop_to_bbox",

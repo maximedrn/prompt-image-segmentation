@@ -63,7 +63,7 @@ build-backend = "poetry.core.masonry.api"
 [tool.poe.tasks]
 format = "black src tests scripts"
 lint = ["_pylint", "_mypy"]
-_pylint = "pylint src"
+_pylint = "pylint src tests scripts"
 _mypy = "mypy src"
 test = "pytest"
 outdated = "poetry show --outdated --top-level"
@@ -133,7 +133,9 @@ disable_error_code = ["explicit-any"]
 py-version = "3.14"
 jobs = 0
 recursive = true
-source-roots = ["src"]
+# ``.`` is what makes ``tests.conftest`` resolvable, exactly as
+# ``pythonpath`` does for pytest.
+source-roots = ["src", "."]
 ignore-paths = []
 load-plugins = [
     "pylint.extensions.bad_builtin",
@@ -167,7 +169,10 @@ fail-on = ["E", "F"]
 
 [tool.pylint."messages control"]
 enable = ["all"]
-disable = []
+# Both fire once per deliberate ``# pylint: disable``, reporting that a
+# suppression exists rather than that anything is wrong. The check that
+# earns its keep, ``useless-suppression``, stays on.
+disable = ["locally-disabled", "suppressed-message"]
 [tool.pylint.format]
 max-line-length = 79
 expected-line-ending-format = "LF"
@@ -252,3 +257,12 @@ reportMissingParameterType = false
 
 [[tool.pyright.executionEnvironments]]
 root = "src"
+
+# Only the editor runs ruff, but it must agree with black on width and
+# keep the aliased imports grouped the way the codebase writes them.
+[tool.ruff]
+line-length = 79
+target-version = "py314"
+
+[tool.ruff.lint.isort]
+combine-as-imports = true

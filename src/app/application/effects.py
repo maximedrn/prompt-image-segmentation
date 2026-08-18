@@ -19,7 +19,7 @@ Nothing else in the application imports ``stateless`` directly.
 from collections.abc import Callable
 from typing import Never
 
-from stateless.effect import Effect, Success, catch
+from stateless.effect import Catch, Effect, Success, Try, catch
 from stateless.need import Need, need
 
 from app.application.capabilities import (
@@ -31,12 +31,14 @@ from app.application.capabilities import (
 from app.application.policies import SegmentationPolicy
 from app.domain import (
     DeviceExhausted,
-    Prompt,
-    SourceImage,
     FaceAnalysisUnavailable,
+    MaskArray,
     NoDetection,
     PersonPayload,
+    PixelBox,
+    Prompt,
     SegmentedImage,
+    SourceImage,
 )
 
 type SegmentAbilities = (
@@ -63,6 +65,19 @@ type PersonEffect = Effect[PersonAbilities, PersonFailure, PersonPayload]
 """Analyse the faces in one image."""
 
 
+type Detect = Callable[
+    [SourceImage, Prompt],
+    Try[DeviceExhausted, tuple[tuple[PixelBox, ...], tuple[float, ...]]],
+]
+"""Detection with its device failure moved into the error channel."""
+
+type Refine = Callable[
+    [SourceImage, tuple[PixelBox, ...]],
+    Try[DeviceExhausted, tuple[MaskArray, tuple[float, ...]]],
+]
+"""Refinement with its device failure moved into the error channel."""
+
+
 type WiredSegment = Callable[
     [SourceImage, Prompt, PersonPayload | None],
     Effect[Never, SegmentFailure, SegmentedImage],
@@ -83,9 +98,9 @@ def catch_segment_failures(wired: WiredSegment) -> CaughtSegment:
     concrete types instead of a ``try`` block, which is what keeps
     ``except`` out of the interfaces layer.
 
-    The ignore is the third and last ``stateless`` concession: ``catch``
-    widens its result union to bare ``Exception`` because its overloads
-    cannot express "these are exactly the declared failures".
+    Annotating the decorator as ``Catch[SegmentFailure]`` is what keeps
+    the result union narrow: inferred, ``catch`` widens it to bare
+    ``Exception``.
 
     :param wired: Use case with all capabilities already supplied.
     :type wired: WiredSegment
@@ -93,8 +108,8 @@ def catch_segment_failures(wired: WiredSegment) -> CaughtSegment:
         them.
     :rtype: CaughtSegment
     """
-    handle = catch(NoDetection, DeviceExhausted)
-    caught: CaughtSegment = handle(wired)  # type: ignore[assignment]
+    handle: Catch[SegmentFailure] = catch(NoDetection, DeviceExhausted)
+    caught: CaughtSegment = handle(wired)
     return caught
 
 
@@ -163,13 +178,15 @@ def need_segmentation_policy() -> (
 
 
 __all__: list[str] = [
+    "CaughtSegment",
+    "Detect",
     "PersonAbilities",
     "PersonEffect",
     "PersonFailure",
+    "Refine",
     "SegmentAbilities",
     "SegmentEffect",
     "SegmentFailure",
-    "CaughtSegment",
     "WiredSegment",
     "catch_segment_failures",
     "need_face_analyser",

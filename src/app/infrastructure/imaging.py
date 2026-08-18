@@ -10,11 +10,11 @@ from base64 import b64encode
 from io import BytesIO
 from typing import Final, final
 
-from PIL import Image as PilImage
-from PIL.Image import Image
 from cv2 import dilate as cv2_dilate
 from numpy import array, ones, uint8
 from numpy.typing import NDArray
+from PIL import Image as PilImage
+from PIL.Image import Image
 
 from app.domain import (
     PERCENTAGE,
@@ -59,6 +59,7 @@ def encode_png(pixels: NDArray[uint8]) -> str:
     :returns: Base64 text of a PNG payload.
     :rtype: str
     """
+    buffer: BytesIO
     with BytesIO() as buffer:
         PilImage.fromarray(pixels).save(buffer, format=ImageFormat.PNG)
         encoded: bytes = b64encode(buffer.getvalue())
@@ -84,6 +85,8 @@ class OpenCvMaskDilator:
         :rtype: app.domain.models.MaskArray
         """
         ratio: float = clamp_percentage(percentage) / PERCENTAGE.whole
+        height: int
+        width: int
         height, width = mask.shape[:2]
         kernel: NDArray[uint8] = ones(
             (

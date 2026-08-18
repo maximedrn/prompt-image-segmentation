@@ -15,6 +15,8 @@ from app.application.capabilities import (
     ObjectDetector,
 )
 from app.application.effects import (
+    Detect,
+    Refine,
     SegmentEffect,
     need_mask_dilator,
     need_mask_refiner,
@@ -24,8 +26,8 @@ from app.application.effects import (
 from app.application.policies import SegmentationPolicy
 from app.domain import (
     BBox,
-    DeviceExhausted,
     Detection,
+    DeviceExhausted,
     MaskArray,
     NoDetection,
     PersonPayload,
@@ -93,13 +95,17 @@ def segment(
     dilator: MaskDilator = yield from need_mask_dilator()
     policy: SegmentationPolicy = yield from need_segmentation_policy()
 
-    detect = throws(DeviceExhausted)(detector.detect)
-    refine = throws(DeviceExhausted)(refiner.refine)
+    detect: Detect = throws(DeviceExhausted)(detector.detect)
+    refine: Refine = throws(DeviceExhausted)(refiner.refine)
 
+    boxes: tuple[PixelBox, ...]
+    detection_scores: tuple[float, ...]
     boxes, detection_scores = yield from detect(image, prompt)
     if not boxes:
         yield from throw(NoDetection(prompt=prompt.text))
 
+    mask: MaskArray
+    mask_scores: tuple[float, ...]
     mask, mask_scores = yield from refine(image, boxes)
     detections: tuple[Detection, ...] = _score_detections(
         boxes, detection_scores, mask_scores

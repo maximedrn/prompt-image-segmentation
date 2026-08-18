@@ -40,8 +40,8 @@ from app.interfaces.http.rate_limit import enforce_rate_limit
 from app.interfaces.http.schemas import (
     ErrorSchema,
     HealthSchema,
-    SegmentSchema,
     SegmentersSchema,
+    SegmentSchema,
 )
 from app.settings import Settings
 
@@ -243,8 +243,8 @@ def segment_endpoint(
 
 
 __all__: list[str] = [
-    "liveness",
     "list_segmenters",
+    "liveness",
     "meta_router",
     "readiness",
     "segment_endpoint",
