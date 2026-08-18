@@ -18,7 +18,6 @@
 # Projects.
 cspell.json
 examples/
-scripts/
 tests/
 
 # Documentation.

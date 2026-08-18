@@ -61,9 +61,9 @@ requires = ["poetry-core>=1.9.0"]
 build-backend = "poetry.core.masonry.api"
 
 [tool.poe.tasks]
-format = "black src tests scripts"
+format = "black src tests"
 lint = ["_pylint", "_mypy"]
-_pylint = "pylint src tests scripts"
+_pylint = "pylint src tests"
 _mypy = "mypy src"
 test = "pytest"
 outdated = "poetry show --outdated --top-level"

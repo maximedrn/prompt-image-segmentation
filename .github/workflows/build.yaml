@@ -28,13 +28,13 @@ jobs:
           pipx install poetry
           poetry install
       - name: Format
-        run: poetry run black --check src tests scripts
+        run: poetry run black --check src tests
       - name: Types
         run: |
           poetry run mypy src
           poetry run pyright
       - name: Lint
-        run: poetry run pylint src tests scripts
+        run: poetry run pylint src tests
       - name: Spelling
         run: npx --yes cspell --no-progress "src/**/*.py" "tests/**/*.py" "*.md"
       # The slow suite loads several hundred megabytes of weights; it runs

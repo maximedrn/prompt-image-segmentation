@@ -8,8 +8,8 @@ pre-commit:
       glob: "*.py"
       run: poetry run black --check {staged_files}
     pylint:
-      glob: "{src,tests,scripts}/**/*.py"
-      run: poetry run pylint src tests scripts
+      glob: "{src,tests}/**/*.py"
+      run: poetry run pylint src tests
     mypy:
       glob: "src/**/*.py"
       run: poetry run mypy src
