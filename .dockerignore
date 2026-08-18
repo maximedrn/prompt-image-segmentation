@@ -16,7 +16,6 @@
 .env*
 
 # Projects.
-bench/
 cspell.json
 examples/
 scripts/

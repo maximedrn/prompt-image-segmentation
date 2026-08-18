@@ -132,6 +132,3 @@ Readiness. `503` until every model is resident, so a container runtime can tell 
 | `poetry run poe test`                | Full suite                         |
 | `poetry run pytest -m "not slow"`    | Fast suite, no model loading       |
 | `poetry run poe audit`               | `pip-audit`                        |
-| `poetry run python scripts/bench.py` | VRAM, latency and startup report   |
-
-`scripts/bench.py --output bench/run.json` writes a comparable report; `memory.nvidia_smi_bytes` is the figure the sub-gigabyte budget is measured against.
