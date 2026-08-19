@@ -22,6 +22,7 @@ from app.interfaces.http.auth import Unauthorized
 from app.interfaces.http.constants import (
     API,
     HEADER,
+    MESSAGE,
     SCHEME,
     ErrorCode,
 )
@@ -74,6 +75,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     :type settings: app.settings.Settings | None
     :returns: A ready-to-serve application.
     :rtype: fastapi.FastAPI
+    :raises RuntimeError: If the UI is enabled but its optional extra is
+        not installed.
     """
     resolved: Settings = settings if settings is not None else Settings()
     ImageFile.LOAD_TRUNCATED_IMAGES = _LOAD_TRUNCATED
@@ -109,9 +112,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     if resolved.enable_ui:
         # Imported here so an API-only deployment never pays for gradio:
-        # a heavy import and an extra slice of attack surface.
+        # a heavy import and an extra slice of attack surface. It is an
+        # optional extra, hence absent from the published images, so the
+        # failure has to name the flag that asked for it.
         # pylint: disable=import-outside-toplevel
-        from app.interfaces.ui import mount_ui
+        try:
+            from app.interfaces.ui import mount_ui
+        except ImportError as error:
+            raise RuntimeError(MESSAGE.ui_unavailable) from error
 
         mount_ui(application, resolved)
 

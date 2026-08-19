@@ -14,12 +14,17 @@ ARG BASE_IMAGE=python:3.13-slim
 ARG TORCH_INDEX_URL=https://download.pytorch.org/whl/cu130
 ARG TORCH_VERSION=2.13.0
 ARG TORCHVISION_VERSION=0.28.0
+# The API never imports gradio, and pulling it in costs 116 MB across 16
+# packages. Build with `--build-arg INSTALL_UI=true` for an image that
+# can serve `ENABLE_UI=true`.
+ARG INSTALL_UI=false
 
 FROM ${BASE_IMAGE} AS build
 
 ARG TORCH_INDEX_URL
 ARG TORCH_VERSION
 ARG TORCHVISION_VERSION
+ARG INSTALL_UI
 
 ENV DEBIAN_FRONTEND=noninteractive \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
@@ -47,6 +52,7 @@ COPY pyproject.toml poetry.lock ./
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip install --upgrade pip poetry \
     && poetry install --only main --no-root \
+        $([ "${INSTALL_UI}" = "true" ] && echo "--extras ui") \
     && pip install --index-url "${TORCH_INDEX_URL}" --force-reinstall \
         "torch==${TORCH_VERSION}" "torchvision==${TORCHVISION_VERSION}"
 
@@ -67,6 +73,11 @@ RUN --mount=type=cache,target=/root/.cache/pip pip install nuitka \
         --no-progressbar \
         --assume-yes-for-downloads \
     && rm -rf /build/compiled/app.build
+
+# The C++ headers and static libraries only matter to something
+# compiling a torch extension, which the runtime never does.
+RUN rm -rf "${VIRTUAL_ENV}"/lib/python*/site-packages/torch/include \
+    && find "${VIRTUAL_ENV}" -name "*.a" -delete
 
 # Removes the cold-start penalty for the dependencies. Without it the
 # interpreter re-compiles every .py in torch, transformers and their
@@ -92,12 +103,17 @@ ENV DEBIAN_FRONTEND=noninteractive \
 # The cache directory is created and owned here because Docker seeds a
 # fresh named volume from the image, and a missing directory yields a
 # root-owned volume the unprivileged user cannot write to.
+#
+# UID 1000 is not arbitrary: Hugging Face runs Space containers as that
+# user, and anything the process writes - the weight cache above all -
+# has to be owned by it.
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \
     apt-get update && apt-get install -y --no-install-recommends \
         libglib2.0-0 curl ca-certificates \
-    && groupadd --system segmentation \
-    && useradd --system --gid segmentation --create-home segmentation \
+    && groupadd --system --gid 1000 segmentation \
+    && useradd --system --uid 1000 --gid segmentation --create-home \
+        segmentation \
     && mkdir -p "${HF_HOME}" \
     && chown segmentation:segmentation "${HF_HOME}"
 

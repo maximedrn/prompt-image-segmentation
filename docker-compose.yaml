@@ -81,7 +81,7 @@ services:
     build:
       context: .
       args:
-        TORCH_INDEX_URL: https://download.pytorch.org/whl/rocm6.4
+        TORCH_INDEX_URL: https://download.pytorch.org/whl/rocm7.1
     devices:
       - /dev/kfd:/dev/kfd
       - /dev/dri:/dev/dri

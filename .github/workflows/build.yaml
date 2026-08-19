@@ -31,7 +31,7 @@ jobs:
       - name: Install
         run: |
           pipx install poetry
-          poetry install
+          poetry install --extras ui
 
       - name: Format
         run: poetry run black --check src tests
@@ -102,7 +102,7 @@ jobs:
           - profile: cuda
             index: https://download.pytorch.org/whl/cu130
           - profile: rocm
-            index: https://download.pytorch.org/whl/rocm6.4
+            index: https://download.pytorch.org/whl/rocm7.1
     steps:
       - name: Checkout
         uses: actions/checkout@v4
