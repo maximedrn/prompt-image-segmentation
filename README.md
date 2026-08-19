@@ -39,7 +39,7 @@ Prompt-driven image segmentation. Give it an image and any text prompt - get bac
 ```bash
 cp .env.template .env
 
-docker compose --profile cuda up
+docker compose --profile [cuda|rocm|cpu] up --build -d
 # API: http://localhost:7860
 # Documentation: http://localhost:7860/docs
 ```
@@ -53,10 +53,12 @@ docker pull ghcr.io/maximedrn/prompt-image-segmentation:[cuda|rocm|cpu]
 
 ### Hugging Face Space
 
-The Space builds this `Dockerfile`, so it needs three entries under *Settings -> Variables and secrets*:
-- `AUTH_MODE=none` for a public demo,
-- `ENABLE_UI=true` to serve the Gradio page at `/`,
-- `INSTALL_UI=true` so the image is built with the optional extra.
+The Space builds this `Dockerfile`, so it needs two entries under
+*Settings -> Variables and secrets*: `AUTH_MODE=none` for a public demo,
+and `ENABLE_UI=true` to serve the Gradio page at `/`. Variables reach
+both the build and the runtime, which is what lets `ENABLE_UI` install
+the extra and then switch the page on. Use secrets instead if you keep
+authentication on.
 
 ### Development
 

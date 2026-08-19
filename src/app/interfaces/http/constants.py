@@ -90,7 +90,7 @@ class Message:
     feature_unavailable: str = "This feature is not installed on the server."
     ui_unavailable: str = (
         "ENABLE_UI is on, but gradio is not installed. Install the "
-        "'ui' extra, or build the image with INSTALL_UI=true."
+        "'ui' extra, or rebuild the image with ENABLE_UI=true."
     )
     out_of_memory: str = (
         "Not enough device memory for this image. Retry with a smaller one."

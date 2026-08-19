@@ -14,10 +14,9 @@ x-app-common: &app-common
     - no-new-privileges:true
   pids_limit: 256
   environment:
-    # Fails the container rather than silently serving an open API.
     AUTH_MODE: ${AUTH_MODE:-basic}
-    SEGMENTATION_USERNAME: ${SEGMENTATION_USERNAME:?set SEGMENTATION_USERNAME}
-    SEGMENTATION_PASSWORD: ${SEGMENTATION_PASSWORD:?set SEGMENTATION_PASSWORD}
+    SEGMENTATION_USERNAME: ${SEGMENTATION_USERNAME:-}
+    SEGMENTATION_PASSWORD: ${SEGMENTATION_PASSWORD:-}
   env_file:
     - path: .env
       required: false
@@ -57,6 +56,9 @@ services:
       context: .
       args:
         TORCH_INDEX_URL: https://download.pytorch.org/whl/cpu
+        # Installs the extra as well: enabling the UI at runtime needs
+        # the package to have been there at build time.
+        ENABLE_UI: ${ENABLE_UI:-false}
 
   app-cuda:
     <<: *app-common
@@ -66,6 +68,9 @@ services:
       context: .
       args:
         TORCH_INDEX_URL: https://download.pytorch.org/whl/cu130
+        # Installs the extra as well: enabling the UI at runtime needs
+        # the package to have been there at build time.
+        ENABLE_UI: ${ENABLE_UI:-false}
     deploy:
       resources:
         reservations:
@@ -82,6 +87,9 @@ services:
       context: .
       args:
         TORCH_INDEX_URL: https://download.pytorch.org/whl/rocm7.1
+        # Installs the extra as well: enabling the UI at runtime needs
+        # the package to have been there at build time.
+        ENABLE_UI: ${ENABLE_UI:-false}
     devices:
       - /dev/kfd:/dev/kfd
       - /dev/dri:/dev/dri
