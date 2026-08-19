@@ -4,11 +4,6 @@ name: prompt-image-segmentation
 # on purpose: Docker Desktop for macOS exposes no GPU to containers, so
 # Apple Silicon runs natively (see the README).
 x-app-common: &app-common
-  build:
-    context: .
-    cache_from:
-      - prompt-image-segmentation:latest
-  image: prompt-image-segmentation:latest
   restart: unless-stopped
   init: true
   stop_grace_period: 30s
@@ -57,6 +52,7 @@ services:
   app-cpu:
     <<: *app-common
     profiles: ["cpu"]
+    image: ghcr.io/maximedrn/prompt-image-segmentation:cpu
     build:
       context: .
       args:
@@ -65,6 +61,11 @@ services:
   app-cuda:
     <<: *app-common
     profiles: ["cuda"]
+    image: ghcr.io/maximedrn/prompt-image-segmentation:cuda
+    build:
+      context: .
+      args:
+        TORCH_INDEX_URL: https://download.pytorch.org/whl/cu130
     deploy:
       resources:
         reservations:
@@ -76,6 +77,7 @@ services:
   app-rocm:
     <<: *app-common
     profiles: ["rocm"]
+    image: ghcr.io/maximedrn/prompt-image-segmentation:rocm
     build:
       context: .
       args:

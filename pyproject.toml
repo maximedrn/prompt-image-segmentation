@@ -8,9 +8,7 @@ readme = "README.md"
 packages = [{ include = "app", from = "src" }]
 
 [tool.poetry.dependencies]
-# 3.14.1 is excluded by torchvision 0.28, so the floor is 3.14.2 rather
-# than a plain `~3.14`.
-python = ">=3.14.2,<3.15"
+python = ">=3.13,<3.14"
 fastapi = "^0.141.1"
 uvicorn = { extras = ["standard"], version = "^0.52.3" }
 python-multipart = "^0.0.32"
@@ -80,7 +78,7 @@ markers = [
 
 [tool.black]
 line-length = 79
-target-version = ["py314"]
+target-version = ["py313"]
 preview = true
 enable-unstable-feature = [
     "hug_parens_with_braces_and_square_brackets",
@@ -89,7 +87,7 @@ enable-unstable-feature = [
 ]
 
 [tool.mypy]
-python_version = "3.14"
+python_version = "3.13"
 mypy_path = ["src/typings"]
 plugins = ["pydantic.mypy"]
 strict = true
@@ -130,7 +128,7 @@ module = [
 disable_error_code = ["explicit-any"]
 
 [tool.pylint.main]
-py-version = "3.14"
+py-version = "3.13"
 jobs = 0
 recursive = true
 # ``.`` is what makes ``tests.conftest`` resolvable, exactly as
@@ -243,7 +241,7 @@ bad-functions = ["map", "filter"]
 include = ["src"]
 extraPaths = ["src", "src/typings"]
 stubPath = "src/typings"
-pythonVersion = "3.14"
+pythonVersion = "3.13"
 typeCheckingMode = "strict"
 reportMissingTypeStubs = false
 
@@ -262,7 +260,7 @@ root = "src"
 # keep the aliased imports grouped the way the codebase writes them.
 [tool.ruff]
 line-length = 79
-target-version = "py314"
+target-version = "py313"
 
 [tool.ruff.lint.isort]
 combine-as-imports = true

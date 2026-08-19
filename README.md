@@ -6,7 +6,7 @@ colorTo: blue
 sdk: docker
 app_port: 7860
 pinned: false
-python_version : "3.14"
+python_version : "3.13"
 ---
 
 # Prompt Image Segmentation
@@ -27,9 +27,9 @@ Prompt-driven image segmentation. Give it an image and any text prompt - get bac
 
 | Backend | How to run                                     |
 | ------- | ---------------------------------------------- |
-| CUDA    | `docker compose --profile cuda up --build`     |
-| ROCm    | `docker compose --profile rocm up --build`     |
-| CPU     | `docker compose --profile cpu up --build`      |
+| CUDA    | `docker compose --profile cuda up`             |
+| ROCm    | `docker compose --profile rocm up`             |
+| CPU     | `docker compose --profile cpu up`              |
 | Metal   | natively, see [Development](#development)      |
 
 Metal has no Docker profile because Docker Desktop for macOS exposes no GPU to containers. Precision is picked per backend: `bfloat16` on CUDA/ROCm where the hardware supports it, `float16` on Metal, `float32` on CPU.
@@ -41,12 +41,22 @@ Metal has no Docker profile because Docker Desktop for macOS exposes no GPU to c
 ```bash
 cp .env.template .env
 
-docker compose --profile cuda up --build
+docker compose --profile cuda up
 # API:           http://localhost:7860
 # Documentation: http://localhost:7860/docs
 ```
 
-The first start downloads ~700 MB of weights. `/readyz` answers 503 until they are resident, which is what the compose health check waits on.
+That pulls the published image for the profile - `linux/amd64`, one per
+accelerator, built by CI on every push to `master`:
+
+```bash
+docker pull ghcr.io/maximedrn/prompt-image-segmentation:cuda   # or :rocm, :cpu
+```
+
+Add `--build` to any of the commands above to compile the image locally
+instead, which is also the only route on `linux/arm64`. The first start
+downloads ~700 MB of weights. `/readyz` answers 503 until they are
+resident, which is what the compose health check waits on.
 
 ### Development
 

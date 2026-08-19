@@ -10,7 +10,7 @@
 # pip dependencies, so this stays valid for every profile. Swap in
 # `nvidia/cuda:13.3.0-runtime-ubuntu24.04` if a host ever needs the
 # distribution copies as well.
-ARG BASE_IMAGE=python:3.14-slim
+ARG BASE_IMAGE=python:3.13-slim
 ARG TORCH_INDEX_URL=https://download.pytorch.org/whl/cu130
 ARG TORCH_VERSION=2.13.0
 ARG TORCHVISION_VERSION=0.28.0
@@ -110,6 +110,14 @@ COPY --from=build --chown=segmentation:segmentation \
     /build/compiled/ /app/
 
 USER segmentation
+
+# The image is published straight after this build, so the compiled
+# extension gets exercised here rather than in a job that would have to
+# pull several gigabytes back to do it. Building the transport touches
+# every layer that matters - the venv, the .so, the settings - and loads
+# no weights, so it costs a second.
+RUN AUTH_MODE=none python -c \
+    "from app.interfaces.http import create_app; assert create_app()"
 
 EXPOSE 7860
 
