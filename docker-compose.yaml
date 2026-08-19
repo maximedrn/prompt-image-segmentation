@@ -1,20 +1,71 @@
+name: prompt-image-segmentation
+
+# One service per accelerator, selected with `--profile`. Metal is absent
+# on purpose: Docker Desktop for macOS exposes no GPU to containers, so
+# Apple Silicon runs natively (see the README).
+x-app-common: &app-common
+  restart: unless-stopped
+  init: true
+  stop_grace_period: 30s
+  read_only: true
+  cap_drop:
+    - ALL
+  security_opt:
+    - no-new-privileges:true
+  pids_limit: 256
+  environment:
+    # Fails the container rather than silently serving an open API.
+    AUTH_MODE: ${AUTH_MODE:-basic}
+    SEGMENTATION_USERNAME: ${SEGMENTATION_USERNAME:?set SEGMENTATION_USERNAME}
+    SEGMENTATION_PASSWORD: ${SEGMENTATION_PASSWORD:?set SEGMENTATION_PASSWORD}
+  env_file:
+    - path: .env
+      required: false
+  ports:
+    - "${PORT:-7860}:7860"
+  tmpfs:
+    # Read-only root: everything the process writes has to land here.
+    - /tmp:size=256m,mode=1777
+  volumes:
+    # Model weights, ~700 MB, kept across container recreations. The hub
+    # cache handles download atomicity and digest checks itself.
+    - hf-cache:/var/cache/huggingface
+  healthcheck:
+    # Readiness, not liveness: answers 200 only once both models are
+    # resident, which keeps traffic away during a cold download.
+    test:
+      - CMD
+      - curl
+      - --fail
+      - --silent
+      - --show-error
+      - http://127.0.0.1:7860/readyz
+    interval: 15s
+    timeout: 5s
+    retries: 3
+    # Has to cover a cold weight download; start_interval keeps the probe
+    # frequent so the service flips healthy as soon as it is ready.
+    start_period: ${MODEL_DOWNLOAD_GRACE:-15m}
+    start_interval: 5s
+
 services:
-  app:
+  app-cpu:
+    <<: *app-common
+    profiles: ["cpu"]
+    image: ghcr.io/maximedrn/prompt-image-segmentation:cpu
     build:
       context: .
-      cache_from:
-        - app:latest
-    image: app:latest
-    container_name: app
-    ports:
-      - "${PORT:-7860}:7860"
-    env_file:
-      - .env
-    volumes:
-      # Persist SAM ViT-H (~2.4 GB) and any HuggingFace downloads
-      # across container recreations. Nothing else is bind-mounted.
-      - ./checkpoints:/app/checkpoints
-      - hf-cache:/root/.cache/huggingface
+      args:
+        TORCH_INDEX_URL: https://download.pytorch.org/whl/cpu
+
+  app-cuda:
+    <<: *app-common
+    profiles: ["cuda"]
+    image: ghcr.io/maximedrn/prompt-image-segmentation:cuda
+    build:
+      context: .
+      args:
+        TORCH_INDEX_URL: https://download.pytorch.org/whl/cu130
     deploy:
       resources:
         reservations:
@@ -22,13 +73,21 @@ services:
             - driver: nvidia
               count: all
               capabilities: [gpu]
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:7860/healthz"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 60s
+
+  app-rocm:
+    <<: *app-common
+    profiles: ["rocm"]
+    image: ghcr.io/maximedrn/prompt-image-segmentation:rocm
+    build:
+      context: .
+      args:
+        TORCH_INDEX_URL: https://download.pytorch.org/whl/rocm6.4
+    devices:
+      - /dev/kfd:/dev/kfd
+      - /dev/dri:/dev/dri
+    group_add:
+      - ${VIDEO_GID:-44}
+      - ${RENDER_GID:-109}
 
 volumes:
   hf-cache: {}

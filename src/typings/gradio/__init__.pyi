@@ -6,7 +6,7 @@
 
 from collections.abc import Callable, Sequence
 from types import TracebackType
-from typing import Literal, ParamSpec, TypeVar
+from typing import Literal, ParamSpec, Self, TypeVar
 
 from fastapi import FastAPI
 
@@ -19,8 +19,8 @@ class Component:
 class _Container:
     """Base for context-manager containers (Blocks, Row, Column)."""
 
-    def __enter__(self) -> "_Container":
-        """Enter the container context."""
+    def __enter__(self) -> Self:
+        """Enter the container context, narrowed to the subclass."""
 
     def __exit__(
         self,
@@ -41,26 +41,17 @@ class Blocks(_Container):
     ) -> None:
         """Configure the Blocks page title and analytics opt-in."""
 
-    def __enter__(self) -> "Blocks":
-        """Enter the Blocks context (narrowed return type)."""
-
 class Row(_Container):
     """Horizontal layout row."""
 
     def __init__(self) -> None:
         """Instantiate an empty row."""
 
-    def __enter__(self) -> "Row":
-        """Enter the Row context (narrowed return type)."""
-
 class Column(_Container):
     """Vertical layout column."""
 
     def __init__(self, *, scale: int = ...) -> None:
         """Instantiate a column with an optional flex ``scale``."""
-
-    def __enter__(self) -> "Column":
-        """Enter the Column context (narrowed return type)."""
 
 class Markdown(Component):
     """Static Markdown block."""

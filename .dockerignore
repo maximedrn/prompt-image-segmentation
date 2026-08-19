@@ -1,6 +1,7 @@
 # Python.
 **/__pycache__
 **/.mypy_cache
+**/.pytest_cache
 **/*.py[cod]
 **/*.so
 .python-version
@@ -15,10 +16,9 @@
 .env*
 
 # Projects.
-checkpoints/*
-!checkpoints/.gitkeep
-docker/
 cspell.json
+examples/
+tests/
 
 # Documentation.
 *.md

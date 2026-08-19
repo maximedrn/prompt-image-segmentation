@@ -8,11 +8,16 @@ pre-commit:
       glob: "*.py"
       run: poetry run black --check {staged_files}
     pylint:
-      glob: "src/**/*.py"
-      run: poetry run pylint src
+      glob: "{src,tests}/**/*.py"
+      run: poetry run pylint src tests
     mypy:
       glob: "src/**/*.py"
       run: poetry run mypy src
+    # Only the fast suite: the slow tests load the models and belong in
+    # CI, not in front of every commit.
+    pytest:
+      glob: "{src,tests}/**/*.py"
+      run: poetry run pytest -m "not slow"
     cspell:
       glob: "*.{py,md,toml,yaml,yml}"
       run: cspell --no-progress --no-summary {staged_files}
