@@ -32,8 +32,6 @@ Prompt-driven image segmentation. Give it an image and any text prompt - get bac
 | CPU     | `docker compose --profile cpu up`              |
 | Metal   | natively, see [Development](#development)      |
 
-Metal has no Docker profile because Docker Desktop for macOS exposes no GPU to containers. Precision is picked per backend: `bfloat16` on CUDA/ROCm where the hardware supports it, `float16` on Metal, `float32` on CPU.
-
 ## Quickstart
 
 ### Production
@@ -42,42 +40,44 @@ Metal has no Docker profile because Docker Desktop for macOS exposes no GPU to c
 cp .env.template .env
 
 docker compose --profile cuda up
-# API:           http://localhost:7860
+# API: http://localhost:7860
 # Documentation: http://localhost:7860/docs
 ```
 
-That pulls the published image for the profile - `linux/amd64`, one per
-accelerator, built by CI on every push to `master`:
+The published images are pulled by the commands above. To fetch one
+directly:
 
 ```bash
-docker pull ghcr.io/maximedrn/prompt-image-segmentation:cuda   # or :rocm, :cpu
+docker pull ghcr.io/maximedrn/prompt-image-segmentation:[cuda|rocm|cpu]
 ```
 
-Add `--build` to any of the commands above to compile the image locally
-instead, which is also the only route on `linux/arm64`. The first start
-downloads ~700 MB of weights. `/readyz` answers 503 until they are
-resident, which is what the compose health check waits on.
+### Hugging Face Space
+
+The Space builds this `Dockerfile`, so it needs three entries under *Settings -> Variables and secrets*:
+- `AUTH_MODE=none` for a public demo,
+- `ENABLE_UI=true` to serve the Gradio page at `/`,
+- `INSTALL_UI=true` so the image is built with the optional extra.
 
 ### Development
 
 ```bash
-poetry install
+poetry install --extras ui
 ENABLE_UI=true poetry run uvicorn app.interfaces.http:create_app \
     --factory --host 0.0.0.0 --port 7860
 ```
 
-The Gradio UI is off by default: production serves the JSON API only and never imports `gradio`.
-
 ## API
 
-Every route but `/healthz` and `/readyz` requires HTTP Basic credentials and is rate limited per client address.
+`POST /segment` requires HTTP Basic credentials and is rate limited per client address. The three routes below it are open: they expose no image data and a probe has to reach them before any secret is configured.
 
 ### `GET /healthz`
 
 Liveness. Answers as soon as the process is up, before the models finish loading.
 
 ```json
-{ "status": "ok" }
+{
+  "status": "ok"
+}
 ```
 
 ### `GET /readyz`
@@ -85,13 +85,17 @@ Liveness. Answers as soon as the process is up, before the models finish loading
 Readiness. `503` until every model is resident, so a container runtime can tell a cold start from a wedged process.
 
 ```json
-{ "status": "ready" }
+{
+  "status": "ready"
+}
 ```
 
 ### `GET /segmenters`
 
 ```json
-{ "available": ["sam_dino"] }
+{
+  "available": ["sam_dino"]
+}
 ```
 
 ### `POST /segment` (multipart form-data)
@@ -122,15 +126,17 @@ Readiness. `503` until every model is resident, so a container runtime can tell 
 }
 ```
 
-- `bbox` is the padded bounding box of the mask in the **original** image's coordinate system.
-- `mask` and `image` are already cropped to `bbox` - align them by drawing at `(bbox.x, bbox.y)`.
-- `person_mode=true` adds a `person` object:
+With `person_mode=true` the same body carries one extra field:
 
 ```json
-{ "genders": [0], "age_bands": ["sixties"], "is_adult": true }
+{
+  "person": {
+    "genders": [0],
+    "age_bands": ["sixties"],
+    "is_adult": true
+  }
+}
 ```
-
-`is_adult` is **fail-safe**, not merely likely: the age estimator classifies into ranges, and the band from ten to nineteen straddles the threshold, so it never certifies adulthood. `age_bands` is exposed so a caller can apply its own policy.
 
 ## Commands
 

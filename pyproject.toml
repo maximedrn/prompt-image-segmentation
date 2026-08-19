@@ -12,7 +12,7 @@ python = ">=3.13,<3.14"
 fastapi = "^0.141.1"
 uvicorn = { extras = ["standard"], version = "^0.52.3" }
 python-multipart = "^0.0.32"
-gradio = "^6.24"
+gradio = { version = "^6.24", optional = true }
 jinja2 = "^3.1.6"
 pydantic = "^2.13.4"
 pydantic-settings = "^2.15"
@@ -21,22 +21,14 @@ numpy = "^2.5.2"
 opencv-python-headless = "^5.0.0"
 requests = "^2.34.2"
 huggingface-hub = "^1.27"
-# Ships GroundingDINO and SAM 2.1 natively: no vendored fork, no compiled
-# CUDA kernels, so ROCm / CPU / MPS all run the same code path.
 transformers = "^5.15"
-# Effect abstraction: Effect[Need[T], Error, Result] with explicit
-# capabilities. Pure Python, so it compiles and installs anywhere.
 stateless = "^0.6.1"
 anyio = "^4.14.2"
-# Default PyPI wheels cover: Apple Silicon (MPS), CPU everywhere else.
-# NVIDIA CUDA or AMD ROCm users reinstall torch after `poetry install`
-# from the matching index - see README. Poetry cannot host multiple
-# source-specific variants of the same package in one lock file.
-#
-# torchvision is required even though nothing here imports it directly:
-# transformers' Sam2ImageProcessor refuses to load without it.
 torch = "^2.13.0"
 torchvision = "^0.28.0"
+
+[tool.poetry.extras]
+ui = ["gradio"]
 
 [tool.poetry.group.dev.dependencies]
 black = "^26.5.1"
