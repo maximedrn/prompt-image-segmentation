@@ -14,17 +14,14 @@ ARG BASE_IMAGE=python:3.13-slim
 ARG TORCH_INDEX_URL=https://download.pytorch.org/whl/cu130
 ARG TORCH_VERSION=2.13.0
 ARG TORCHVISION_VERSION=0.28.0
-# The API never imports gradio, and pulling it in costs 116 MB across 16
-# packages. Build with `--build-arg INSTALL_UI=true` for an image that
-# can serve `ENABLE_UI=true`.
-ARG INSTALL_UI=false
+ARG ENABLE_UI=false
 
 FROM ${BASE_IMAGE} AS build
 
 ARG TORCH_INDEX_URL
 ARG TORCH_VERSION
 ARG TORCHVISION_VERSION
-ARG INSTALL_UI
+ARG ENABLE_UI
 
 ENV DEBIAN_FRONTEND=noninteractive \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
@@ -52,7 +49,7 @@ COPY pyproject.toml poetry.lock ./
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip install --upgrade pip poetry \
     && poetry install --only main --no-root \
-        $([ "${INSTALL_UI}" = "true" ] && echo "--extras ui") \
+        $([ "${ENABLE_UI}" = "true" ] && echo "--extras ui") \
     && pip install --index-url "${TORCH_INDEX_URL}" --force-reinstall \
         "torch==${TORCH_VERSION}" "torchvision==${TORCHVISION_VERSION}"
 
@@ -60,15 +57,22 @@ COPY src/ /build/src/
 
 # Compile the application package to a native extension module. Only the
 # resulting .so reaches the runtime stage, so no source of ours is
-# interpreted - or shipped - in production. Dependencies stay as wheels:
-# Nuitka's standalone mode has a long history of breaking on
-# torch + transformers, whose PyTorch detection is metadata-based, and
-# bundling them would not shrink the image anyway.
+# interpreted - or shipped - in production.
+#
+# `stateless` is compiled with it, and has to be: Nuitka 4.1.3 discards
+# the return value of a `yield from` when the delegated generator is
+# interpreted, so every `yield from need(...)` in a compiled use case
+# came back as None. Compiling both sides of the delegation restores it.
+#
+# Everything else stays a wheel: Nuitka's standalone mode has a long
+# history of breaking on torch + transformers, whose PyTorch detection
+# is metadata-based, and bundling them would not shrink the image.
 RUN --mount=type=cache,target=/root/.cache/pip pip install nuitka \
     && cd /build/src \
     && python -m nuitka \
         --module app \
         --include-package=app \
+        --include-package=stateless \
         --output-dir=/build/compiled \
         --no-progressbar \
         --assume-yes-for-downloads \
@@ -89,8 +93,11 @@ RUN python -m compileall -q -j 0 "${VIRTUAL_ENV}"
 
 FROM ${BASE_IMAGE} AS runtime
 
+ARG ENABLE_UI
+
 ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONUNBUFFERED=1 \
+    ENABLE_UI=${ENABLE_UI} \
     VIRTUAL_ENV=/opt/venv \
     PATH=/opt/venv/bin:$PATH \
     PYTHONPATH=/app \
@@ -133,7 +140,11 @@ USER segmentation
 # every layer that matters - the venv, the .so, the settings - and loads
 # no weights, so it costs a second.
 RUN AUTH_MODE=none python -c \
-    "from app.interfaces.http import create_app; assert create_app()"
+        "import app;" \
+        "assert app.__compiled__;" \
+        "from app.interfaces.http import create_app;" \
+        "assert create_app()" \
+    && test -z "$(find /app -name '*.py')"
 
 EXPOSE 7860
 

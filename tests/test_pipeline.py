@@ -31,6 +31,7 @@ from app.domain import (
     PersonPayload,
     Prompt,
     SegmentedImage,
+    SegmentRegion,
     SourceImage,
     binarize,
 )
@@ -56,8 +57,8 @@ def application_fixture() -> Application:
     """
     settings: Settings = Settings(
         AUTH_MODE=AuthMode.NONE,
-        MASK_PADDING_PCT=10.0,
-        DILATION_PCT=3.0,
+        MASK_PADDING_PERCENTAGE=10.0,
+        DILATION_PERCENTAGE=3.0,
         _env_file=None,
     )
     return build(settings)
@@ -69,7 +70,7 @@ def _load(name: str) -> SourceImage:
     :param name: Example stem, e.g. ``"dog"``.
     :type name: str
     :returns: The decoded image.
-    :rtype: app.domain.models.SourceImage
+    :rtype: app.domain.SourceImage
     """
     opened: Image = PilImage.open(EXAMPLES / f"{name}-original.png").convert(
         ImageMode.RGB
@@ -89,7 +90,7 @@ def _segment(
     :param prompt: Prompt to segment with.
     :type prompt: str
     :returns: The segmentation result.
-    :rtype: app.domain.models.SegmentedImage
+    :rtype: app.domain.SegmentedImage
     """
     outcome: SegmentOutcome = application.segment(
         application.settings.default_segmenter,
@@ -101,16 +102,41 @@ def _segment(
     return outcome
 
 
+def _only_region(
+    application: Application, name: str, prompt: str
+) -> SegmentRegion:
+    """Segment one example and require a single merged region.
+
+    The default options union the masks and crop the result, so a
+    successful run yields exactly one region: the cropped, dilated mask
+    under its padded box.
+
+    :param application: The wired application.
+    :type application: app.bootstrap.Application
+    :param name: Example stem.
+    :type name: str
+    :param prompt: Prompt to segment with.
+    :type prompt: str
+    :returns: The one region the segmentation produced.
+    :rtype: app.domain.SegmentRegion
+    """
+    regions: tuple[SegmentRegion, ...] = _segment(
+        application, name, prompt
+    ).regions
+    assert len(regions) == 1, f"{name}: expected one region, got {regions}"
+    return regions[0]
+
+
 @pytest.mark.parametrize(
     ("name", "prompt"),
-    [("dog", "dog"), ("cat", "cat"), ("man", "costume. glasses")],
+    [("dog", "dog"), ("cat", "cat"), ("human", "human")],
 )
 def test_masks_match_the_reference_pipeline(
     application: Application, name: str, prompt: str
 ) -> None:
     """SAM 2.1-tiny reproduces what SAM ViT-H used to produce."""
     produced: NDArray[bool_] = binarize(
-        _segment(application, name, prompt).cropped_mask
+        _only_region(application, name, prompt).mask
     )
     reference_image: Image = PilImage.open(
         EXAMPLES / f"{name}-mask.png"
@@ -158,7 +184,7 @@ def test_concurrent_requests_do_not_cross_over(
     """
     cases: list[tuple[str, str]] = [("dog", "dog"), ("cat", "cat")]
     expected: dict[str, BBox] = {
-        name: _segment(application, name, prompt).bbox
+        name: _only_region(application, name, prompt).bbox
         for name, prompt in cases
     }
 
@@ -168,12 +194,10 @@ def test_concurrent_requests_do_not_cross_over(
         :param index: Iteration counter deciding which case runs.
         :type index: int
         :returns: The case name and the box it produced.
-        :rtype: tuple[str, app.domain.models.BBox]
+        :rtype: tuple[str, app.domain.BBox]
         """
-        name: str
-        prompt: str
         name, prompt = cases[index % len(cases)]
-        return name, _segment(application, name, prompt).bbox
+        return name, _only_region(application, name, prompt).bbox
 
     pool: ThreadPoolExecutor
     with ThreadPoolExecutor(max_workers=WORKERS) as pool:
@@ -197,7 +221,7 @@ def test_face_analysis_ignores_animals(application: Application) -> None:
     every threshold tried, which is why a purpose-built detector runs
     here instead. This is the check that keeps that decision honest.
     """
-    person: PersonPayload = application.analyse_faces(_load("man"))
+    person: PersonPayload = application.analyse_faces(_load("human"))
     assert len(person.genders) == 1
     assert len(person.age_bands) == len(person.genders)
     assert person.is_adult is True

@@ -19,6 +19,20 @@ jobs:
   verify:
     name: Checkers and fast tests
     runs-on: ubuntu-latest
+    # The store tests skip themselves without a server, which would let
+    # the adapter rot silently. This is what keeps them running.
+    services:
+      redis:
+        image: redis:8-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 3s
+          --health-retries 5
+    env:
+      REDIS_URL: redis://localhost:6379/15
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -75,7 +89,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.cache/huggingface
-          key: hf-${{ hashFiles('src/app/infrastructure/constants.py') }}
+          key: hf-${{ hashFiles('src/app/infrastructure/inference/constants.py') }}
 
       - name: Install
         run: |
@@ -168,16 +182,16 @@ jobs:
           poetry run python -m nuitka \
             --module app \
             --include-package=app \
+            --include-package=stateless \
             --output-dir=../build/nuitka \
             --no-progressbar \
             --assume-yes-for-downloads
 
-      - name: Import the compiled module
+      # The fast suite against the .so rather than the sources: this is
+      # what catches a compiler that changes behaviour instead of
+      # failing, which `--include-package=stateless` above exists for.
+      - name: Test the compiled module
         env:
+          PYTHONPATH: ${{ github.workspace }}/build/nuitka:${{ github.workspace }}
           AUTH_MODE: none
-        run: |
-          cd build/nuitka
-          poetry run python -c "
-          from app.interfaces.http import create_app
-          assert create_app() is not None
-          "
+        run: poetry run pytest -m "not slow" -o pythonpath= -q

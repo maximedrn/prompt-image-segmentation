@@ -1,13 +1,4 @@
-"""Recoverable failure taxonomy.
-
-Each error carries the data a caller needs to react, and nothing else.
-There is deliberately no shared base class to catch: a handler that wants
-to treat two failures alike must name both, which keeps the taxonomy
-honest as it grows (``SKILL.md`` section 2).
-
-Defects - a broken invariant, an impossible state - are not modelled
-here. They raise normally and surface as 500 with telemetry.
-"""
+"""Recoverable failure taxonomy."""
 
 from dataclasses import dataclass
 
@@ -75,8 +66,33 @@ class ModelUnavailable(Exception):
 
 
 @dataclass(frozen=True, slots=True)
+class IllegalTransition(Exception):
+    """A job was asked to move somewhere it cannot go from here.
+
+    A defect rather than a caller error in most cases - a worker
+    claiming a job twice, say - but it carries the states so the log
+    says which move was refused.
+    """
+
+    identifier: str
+    state: str
+    attempted: str
+
+
+@dataclass(frozen=True, slots=True)
 class FaceAnalysisUnavailable(Exception):
     """Face analysis was requested but its optional extra is absent."""
+
+    detail: str
+
+
+@dataclass(frozen=True, slots=True)
+class JobStoreUnavailable(Exception):
+    """The store queued work lives in cannot be reached.
+
+    An outage of a dependency, not a defect and not the caller's doing,
+    so it earns a 503 and a retry rather than an opaque 500.
+    """
 
     detail: str
 
@@ -84,6 +100,8 @@ class FaceAnalysisUnavailable(Exception):
 __all__: list[str] = [
     "DeviceExhausted",
     "FaceAnalysisUnavailable",
+    "JobStoreUnavailable",
+    "IllegalTransition",
     "ImageDecodeFailed",
     "InvalidPrompt",
     "ModelUnavailable",

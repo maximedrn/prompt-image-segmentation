@@ -1,33 +1,49 @@
 """Typed outcome to HTTP response.
 
-Every recoverable failure has exactly one status and one code here, so
-the mapping is auditable in one screen (``SKILL.md`` section 31). The
-only broad catch in the application sits at the very bottom of this
-module: a process boundary, where it reports rather than pretends the
-operation succeeded (section 13).
+Each failure gets a plain function that turns it into a body. Starlette
+wants a handler taking ``Exception``, which no precise function can
+satisfy, so :func:`register_transport_failure` bridges the two: it
+narrows once, at the one place that knows which type it registered for.
+That is what lets every responder below keep its real parameter type,
+with no cast and no suppression anywhere.
 """
 
+from collections.abc import Callable
 from http import HTTPStatus
 from logging import Logger, getLogger
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
+from starlette.responses import Response
 
 from app.domain import (
     DeviceExhausted,
     FaceAnalysisUnavailable,
     ImageDecodeFailed,
     InvalidPrompt,
+    JobStoreUnavailable,
     ModelUnavailable,
     NoDetection,
     RateLimited,
     UnknownBackend,
     UploadTooLarge,
 )
-from app.interfaces.http.constants import HEADER, MESSAGE, ErrorCode
+from app.interfaces.http.constants import (
+    ErrorCode,
+    FailureText,
+    HeaderName,
+    JobMessage,
+    LogMessage,
+    Message,
+    RetryAfter,
+    Serialisation,
+)
 from app.interfaces.http.schemas import ErrorSchema
 
-_LOGGER: Logger = getLogger(__name__)
+_logger: Logger = getLogger(__name__)
+
+type Responder[FailedT: Exception] = Callable[[FailedT], JSONResponse]
+"""Turns one kind of failure into the body a caller reads."""
 
 
 def failure_response(
@@ -52,7 +68,7 @@ def failure_response(
     body: ErrorSchema = ErrorSchema(error=code, message=message)
     return JSONResponse(
         status_code=status,
-        content=body.model_dump(mode="json"),
+        content=body.model_dump(mode=Serialisation.json_mode),
         headers=headers,
     )
 
@@ -68,7 +84,7 @@ def map_no_detection(failure: NoDetection) -> JSONResponse:
     return failure_response(
         HTTPStatus.UNPROCESSABLE_CONTENT,
         ErrorCode.NO_DETECTION,
-        f"No detection for prompt {failure.prompt!r}.",
+        FailureText.no_detection.format(prompt=failure.prompt),
     )
 
 
@@ -80,12 +96,131 @@ def map_device_exhausted(failure: DeviceExhausted) -> JSONResponse:
     :returns: A 503 response.
     :rtype: fastapi.responses.JSONResponse
     """
-    _LOGGER.warning("Device exhausted: %s", failure.detail)
+    _logger.warning(LogMessage.device_exhausted, failure.detail)
     return failure_response(
         HTTPStatus.SERVICE_UNAVAILABLE,
         ErrorCode.OUT_OF_MEMORY,
-        MESSAGE.out_of_memory,
+        Message.out_of_memory,
     )
+
+
+def _invalid_prompt(failure: InvalidPrompt) -> JSONResponse:
+    return failure_response(
+        HTTPStatus.UNPROCESSABLE_CONTENT,
+        ErrorCode.INVALID_PROMPT,
+        failure.reason,
+    )
+
+
+def _unknown_backend(failure: UnknownBackend) -> JSONResponse:
+    return failure_response(
+        HTTPStatus.BAD_REQUEST,
+        ErrorCode.UNKNOWN_BACKEND,
+        FailureText.unknown_segmenter.format(
+            requested=failure.requested, available=list(failure.available)
+        ),
+    )
+
+
+def _invalid_image(failure: ImageDecodeFailed) -> JSONResponse:
+    return failure_response(
+        HTTPStatus.UNPROCESSABLE_CONTENT,
+        ErrorCode.INVALID_IMAGE,
+        FailureText.invalid_image.format(detail=failure.detail),
+    )
+
+
+def _upload_too_large(failure: UploadTooLarge) -> JSONResponse:
+    return failure_response(
+        HTTPStatus.CONTENT_TOO_LARGE,
+        ErrorCode.UPLOAD_TOO_LARGE,
+        FailureText.upload_too_large.format(limit=failure.limit_bytes),
+    )
+
+
+def _rate_limited(failure: RateLimited) -> JSONResponse:
+    return failure_response(
+        HTTPStatus.TOO_MANY_REQUESTS,
+        ErrorCode.RATE_LIMITED,
+        Message.rate_limited,
+        headers={HeaderName.retry_after: str(failure.retry_after_seconds)},
+    )
+
+
+def _face_unavailable(failure: FaceAnalysisUnavailable) -> JSONResponse:
+    _logger.error(LogMessage.face_unavailable, failure.detail)
+    return failure_response(
+        HTTPStatus.NOT_IMPLEMENTED,
+        ErrorCode.UNAVAILABLE_FEATURE,
+        Message.feature_unavailable,
+    )
+
+
+def _model_unavailable(failure: ModelUnavailable) -> JSONResponse:
+    _logger.error(LogMessage.model_unavailable, failure.model, failure.detail)
+    return failure_response(
+        HTTPStatus.SERVICE_UNAVAILABLE,
+        ErrorCode.NOT_READY,
+        Message.models_loading,
+    )
+
+
+def _store_unavailable(failure: JobStoreUnavailable) -> JSONResponse:
+    _logger.error(LogMessage.store_unavailable, failure.detail)
+    return failure_response(
+        HTTPStatus.SERVICE_UNAVAILABLE,
+        ErrorCode.STORE_UNAVAILABLE,
+        JobMessage.store_unavailable,
+        headers={HeaderName.retry_after: str(RetryAfter.store_unavailable)},
+    )
+
+
+def _unhandled(failure: Exception) -> JSONResponse:
+    # The transport boundary, and the only broad catch in the code base.
+    # Logged with its traceback, opaque to the caller: the message could
+    # carry a path, a prompt or a checkpoint name.
+    _logger.exception(LogMessage.unhandled, failure)
+    return failure_response(
+        HTTPStatus.INTERNAL_SERVER_ERROR,
+        ErrorCode.INTERNAL,
+        Message.internal,
+    )
+
+
+def register_transport_failure[FailureT: Exception](
+    application: FastAPI,
+    failure_type: type[FailureT],
+    respond: Responder[FailureT],
+) -> None:
+    """Attach one responder to the failure it answers for.
+
+    :param application: The application to configure.
+    :type application: fastapi.FastAPI
+    :param failure_type: What this responder was written for.
+    :type failure_type: type[FailureT]
+    :param respond: Turns that failure into a body.
+    :type respond: Responder[FailureT]
+    """
+
+    async def handle(request: Request, failure: Exception) -> Response:
+        """Narrow to the registered type, then answer.
+
+        :param request: Unused: a failure body depends on the failure.
+        :type request: fastapi.Request
+        :param failure: Whatever starlette caught.
+        :type failure: Exception
+        :returns: The failure body.
+        :rtype: starlette.responses.Response
+        """
+        del request
+        if not isinstance(failure, failure_type):
+            # Starlette dispatches on the type registered here, so this
+            # is unreachable. Re-raising rather than guessing keeps it
+            # that way instead of inventing a response for it.
+            raise failure
+        return respond(failure)
+
+    application.add_exception_handler(failure_type, handle)
 
 
 def _register_client_failures(application: FastAPI) -> None:
@@ -94,64 +229,12 @@ def _register_client_failures(application: FastAPI) -> None:
     :param application: The application to configure.
     :type application: fastapi.FastAPI
     """
-
-    @application.exception_handler(InvalidPrompt)
-    async def _invalid_prompt(  # pyright: ignore[reportUnusedFunction]
-        _request: Request, failure: InvalidPrompt
-    ) -> JSONResponse:
-        return failure_response(
-            HTTPStatus.UNPROCESSABLE_CONTENT,
-            ErrorCode.INVALID_PROMPT,
-            failure.reason,
-        )
-
-    @application.exception_handler(NoDetection)
-    async def _no_detection(  # pyright: ignore[reportUnusedFunction]
-        _request: Request, failure: NoDetection
-    ) -> JSONResponse:
-        return map_no_detection(failure)
-
-    @application.exception_handler(UnknownBackend)
-    async def _unknown_backend(  # pyright: ignore[reportUnusedFunction]
-        _request: Request, failure: UnknownBackend
-    ) -> JSONResponse:
-        return failure_response(
-            HTTPStatus.BAD_REQUEST,
-            ErrorCode.UNKNOWN_BACKEND,
-            f"Unknown segmenter {failure.requested!r}. "
-            f"Available: {list(failure.available)}.",
-        )
-
-    @application.exception_handler(ImageDecodeFailed)
-    async def _invalid_image(  # pyright: ignore[reportUnusedFunction]
-        _request: Request, failure: ImageDecodeFailed
-    ) -> JSONResponse:
-        return failure_response(
-            HTTPStatus.UNPROCESSABLE_CONTENT,
-            ErrorCode.INVALID_IMAGE,
-            f"Invalid image: {failure.detail}",
-        )
-
-    @application.exception_handler(UploadTooLarge)
-    async def _upload_too_large(  # pyright: ignore[reportUnusedFunction]
-        _request: Request, failure: UploadTooLarge
-    ) -> JSONResponse:
-        return failure_response(
-            HTTPStatus.CONTENT_TOO_LARGE,
-            ErrorCode.UPLOAD_TOO_LARGE,
-            f"Upload exceeds {failure.limit_bytes} bytes.",
-        )
-
-    @application.exception_handler(RateLimited)
-    async def _rate_limited(  # pyright: ignore[reportUnusedFunction]
-        _request: Request, failure: RateLimited
-    ) -> JSONResponse:
-        return failure_response(
-            HTTPStatus.TOO_MANY_REQUESTS,
-            ErrorCode.RATE_LIMITED,
-            MESSAGE.rate_limited,
-            headers={HEADER.retry_after: str(failure.retry_after_seconds)},
-        )
+    register_transport_failure(application, InvalidPrompt, _invalid_prompt)
+    register_transport_failure(application, NoDetection, map_no_detection)
+    register_transport_failure(application, UnknownBackend, _unknown_backend)
+    register_transport_failure(application, ImageDecodeFailed, _invalid_image)
+    register_transport_failure(application, UploadTooLarge, _upload_too_large)
+    register_transport_failure(application, RateLimited, _rate_limited)
 
 
 def _register_server_failures(application: FastAPI) -> None:
@@ -160,50 +243,19 @@ def _register_server_failures(application: FastAPI) -> None:
     :param application: The application to configure.
     :type application: fastapi.FastAPI
     """
-
-    @application.exception_handler(DeviceExhausted)
-    async def _device_exhausted(  # pyright: ignore[reportUnusedFunction]
-        _request: Request, failure: DeviceExhausted
-    ) -> JSONResponse:
-        return map_device_exhausted(failure)
-
-    @application.exception_handler(FaceAnalysisUnavailable)
-    async def _face_unavailable(  # pyright: ignore[reportUnusedFunction]
-        _request: Request, failure: FaceAnalysisUnavailable
-    ) -> JSONResponse:
-        _LOGGER.error("Face analysis unavailable: %s", failure.detail)
-        return failure_response(
-            HTTPStatus.NOT_IMPLEMENTED,
-            ErrorCode.UNAVAILABLE_FEATURE,
-            MESSAGE.feature_unavailable,
-        )
-
-    @application.exception_handler(ModelUnavailable)
-    async def _model_unavailable(  # pyright: ignore[reportUnusedFunction]
-        _request: Request, failure: ModelUnavailable
-    ) -> JSONResponse:
-        _LOGGER.error(
-            "Model %s unavailable: %s", failure.model, failure.detail
-        )
-        return failure_response(
-            HTTPStatus.SERVICE_UNAVAILABLE,
-            ErrorCode.NOT_READY,
-            MESSAGE.models_loading,
-        )
-
-    @application.exception_handler(Exception)
-    async def _unhandled(  # pyright: ignore[reportUnusedFunction]
-        _request: Request, failure: Exception
-    ) -> JSONResponse:
-        # The transport boundary, and the only broad catch in the code
-        # base. Logged with its traceback, opaque to the caller: the
-        # message could carry a path, a prompt or a checkpoint name.
-        _LOGGER.exception("Unhandled defect: %s", failure)
-        return failure_response(
-            HTTPStatus.INTERNAL_SERVER_ERROR,
-            ErrorCode.INTERNAL,
-            MESSAGE.internal,
-        )
+    register_transport_failure(
+        application, DeviceExhausted, map_device_exhausted
+    )
+    register_transport_failure(
+        application, FaceAnalysisUnavailable, _face_unavailable
+    )
+    register_transport_failure(
+        application, ModelUnavailable, _model_unavailable
+    )
+    register_transport_failure(
+        application, JobStoreUnavailable, _store_unavailable
+    )
+    register_transport_failure(application, Exception, _unhandled)
 
 
 def register_error_handlers(application: FastAPI) -> None:
@@ -217,8 +269,10 @@ def register_error_handlers(application: FastAPI) -> None:
 
 
 __all__: list[str] = [
+    "Responder",
     "failure_response",
     "map_device_exhausted",
     "map_no_detection",
     "register_error_handlers",
+    "register_transport_failure",
 ]

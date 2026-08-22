@@ -5,7 +5,6 @@ JSON API does not, and it reaches for the application through the same
 state the routes use.
 """
 
-from io import BytesIO
 from typing import final
 
 from fastapi import FastAPI
@@ -34,32 +33,27 @@ from app.domain import (
     PersonPayload,
     Prompt,
     SegmentedImage,
+    SegmentRegion,
     SourceImage,
 )
-from app.infrastructure.imaging import encode_png
-from app.interfaces.http.schemas import SegmentSchema
+from app.infrastructure.imaging.imaging import encode_png
+from app.interfaces.http.constants import Serialisation, StateKey
+from app.interfaces.http.schemas import (
+    JsonValue,
+    RegionSchema,
+    SegmentSchema,
+)
 from app.interfaces.ui.constants import (
-    COMPONENT,
-    LABEL,
-    LAYOUT,
-    UI_MESSAGE,
+    ComponentKind,
+    Hidden,
+    Label,
+    Layout,
+    PanelKey,
+    UiMessage,
 )
 from app.settings import Settings
 
-type UiOutcome = tuple[Image | None, Image | None, dict[str, object]]
-
-
-def _decode(payload: str) -> Image:
-    """Decode a base64 PNG string into a displayable image.
-
-    :param payload: Base64 text of a PNG payload.
-    :type payload: str
-    :returns: The decoded image.
-    :rtype: PIL.Image.Image
-    """
-    from base64 import b64decode  # pylint: disable=import-outside-toplevel
-
-    return PilImage.open(BytesIO(b64decode(payload)))
+type UiOutcome = tuple[Image | None, Image | None, dict[str, JsonValue]]
 
 
 @final
@@ -96,12 +90,12 @@ class SegmentationUi:
         :rtype: UiOutcome
         """
         wired: Application | None = getattr(
-            self._transport.state, "application", None
+            self._transport.state, StateKey.application, None
         )
         if wired is None:
-            return None, None, {"error": UI_MESSAGE.not_ready}
+            return None, None, {PanelKey.error: UiMessage.not_ready}
         if image is None:
-            return None, None, {"error": UI_MESSAGE.missing_image}
+            return None, None, {PanelKey.error: UiMessage.missing_image}
 
         source: SourceImage = SourceImage(
             pixels=array(image.convert(ImageMode.RGB), dtype=uint8)
@@ -115,21 +109,42 @@ class SegmentationUi:
         )
         match outcome:
             case NoDetection():
-                return None, None, {"error": f"No detection for {prompt!r}."}
+                return (
+                    None,
+                    None,
+                    {
+                        PanelKey.error: UiMessage.no_detection.format(
+                            prompt=prompt
+                        )
+                    },
+                )
             case DeviceExhausted():
-                return None, None, {"error": UI_MESSAGE.not_ready}
+                return None, None, {PanelKey.error: UiMessage.not_ready}
             case SegmentedImage():
                 body: SegmentSchema = SegmentSchema.of(
                     result=outcome,
                     prompt=parsed.text,
                     segmenter=backend,
-                    mask=encode_png(outcome.cropped_mask),
-                    image=encode_png(outcome.cropped_image),
+                    regions=RegionSchema.of_all(outcome.regions, encode_png),
                 )
-                payload: dict[str, object] = body.model_dump(mode="json")
-                cropped: Image = _decode(str(payload.pop("image")))
-                mask: Image = _decode(str(payload.pop("mask")))
-                return cropped, mask, payload
+                # The panel gets everything but the payloads themselves:
+                # base64 blobs are unreadable and dwarf the rest.
+                payload: dict[str, JsonValue] = body.model_dump(
+                    mode=Serialisation.json_mode,
+                    exclude={
+                        Hidden.regions: {
+                            Hidden.every_region: {Hidden.mask, Hidden.image}
+                        }
+                    },
+                )
+                # The UI never splits, so there is exactly one region.
+                first: SegmentRegion = outcome.regions[Layout.first_region]
+                cropped: Image | None = (
+                    None
+                    if first.image is None
+                    else PilImage.fromarray(first.image)
+                )
+                return cropped, PilImage.fromarray(first.mask), payload
 
     def blocks(self, backends: list[str]) -> Blocks:
         """Assemble the Gradio layout.
@@ -141,40 +156,40 @@ class SegmentationUi:
         """
         default: str = backends[0] if backends else ""
         blocks: Blocks
-        with Blocks(title=LABEL.title, analytics_enabled=False) as blocks:
-            Markdown(f"# {LABEL.title}")
-            Markdown(LABEL.instructions)
+        with Blocks(title=Label.title, analytics_enabled=False) as blocks:
+            Markdown(f"# {Label.title}")
+            Markdown(Label.instructions)
             with Row():
-                with Column(scale=LAYOUT.column_scale):
+                with Column(scale=Layout.column_scale):
                     image_in: GradioImage = GradioImage(
-                        label=LABEL.image_input,
-                        type=COMPONENT.pil_image,
+                        label=Label.image_input,
+                        type=ComponentKind.pil_image,
                     )
                     prompt_in: Textbox = Textbox(
-                        label=LABEL.prompt_input,
-                        placeholder=LABEL.prompt_placeholder,
-                        lines=LAYOUT.prompt_lines,
+                        label=Label.prompt_input,
+                        placeholder=Label.prompt_placeholder,
+                        lines=Layout.prompt_lines,
                     )
                     backend_in: Dropdown = Dropdown(
-                        label=LABEL.backend_input,
+                        label=Label.backend_input,
                         choices=backends,
                         value=default,
                         interactive=True,
                     )
                     person_in: Checkbox = Checkbox(
-                        label=LABEL.person_input, value=False
+                        label=Label.person_input, value=False
                     )
                     submit: Button = Button(
-                        LABEL.submit, variant=COMPONENT.primary_button
+                        Label.submit, variant=ComponentKind.primary_button
                     )
-                with Column(scale=LAYOUT.column_scale):
+                with Column(scale=Layout.column_scale):
                     image_out: GradioImage = GradioImage(
-                        label=LABEL.image_output
+                        label=Label.image_output
                     )
                     mask_out: GradioImage = GradioImage(
-                        label=LABEL.mask_output
+                        label=Label.mask_output
                     )
-                    json_out: JSON = JSON(label=LABEL.json_output)
+                    json_out: JSON = JSON(label=Label.json_output)
             submit.click(
                 fn=self.submit,
                 inputs=[image_in, prompt_in, person_in, backend_in],
