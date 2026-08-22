@@ -3,7 +3,7 @@
 A fixed window, a request budget, and a hard cap on how many clients are
 tracked so the limiter cannot itself become the memory leak.
 
-ponytail: in-process, single worker. Two uvicorn workers get two
+Deliberate: in-process, single worker. Two uvicorn workers get two
 independent budgets; move the counter to Redis if that ever matters.
 """
 
@@ -11,16 +11,14 @@ from collections import OrderedDict
 from math import ceil
 from threading import Lock
 from time import monotonic
-from typing import Final, final
+from typing import final
 
 from fastapi import Request
+from starlette.requests import HTTPConnection
 
 from app.application.policies import RateLimitPolicy
 from app.domain import RateLimited
-
-_UNKNOWN_CLIENT: Final[str] = "unknown"
-_NO_WAIT: Final[float] = 0.0
-_EMPTY_WINDOW: Final[tuple[int, float]] = (0, 0.0)
+from app.interfaces.http.constants import RateLimitValues
 
 
 @final
@@ -52,9 +50,9 @@ class FixedWindowLimiter:
         """
         now: float = monotonic()
         with self._lock:
-            count: int
-            ends_at: float
-            count, ends_at = self._windows.get(key, _EMPTY_WINDOW)
+            count, ends_at = self._windows.get(
+                key, RateLimitValues.empty_window
+            )
             if ends_at <= now:
                 count, ends_at = 0, now + self._policy.window_seconds
             count += 1
@@ -68,7 +66,7 @@ class FixedWindowLimiter:
                 self._windows.popitem(last=False)
         if count > self._policy.max_requests:
             return ends_at - now
-        return _NO_WAIT
+        return RateLimitValues.no_wait
 
     def check(self, key: str) -> None:
         """Enforce the budget for one caller.
@@ -79,12 +77,20 @@ class FixedWindowLimiter:
         """
         if self._policy.max_requests <= 0:
             return
-        if (wait := self.consume(key)) > _NO_WAIT:
+        if (wait := self.consume(key)) > RateLimitValues.no_wait:
             raise RateLimited(
                 retry_after_seconds=max(
                     self._policy.minimum_retry_after_seconds, ceil(wait)
                 )
             )
+
+
+def _client_of(connection: HTTPConnection) -> str:
+    return (
+        connection.client.host
+        if connection.client
+        else RateLimitValues.unknown_client
+    )
 
 
 def enforce_rate_limit(request: Request) -> None:
@@ -95,8 +101,33 @@ def enforce_rate_limit(request: Request) -> None:
     :raises app.domain.errors.RateLimited: When over budget.
     """
     limiter: FixedWindowLimiter = request.app.state.limiter
-    client: str = request.client.host if request.client else _UNKNOWN_CLIENT
-    limiter.check(client)
+    limiter.check(_client_of(request))
 
 
-__all__: list[str] = ["FixedWindowLimiter", "enforce_rate_limit"]
+def within_rate_limit(connection: HTTPConnection) -> bool:
+    """Count one connection against its budget and report the verdict.
+
+    The socket counterpart of :func:`enforce_rate_limit`: an upgrade
+    cannot carry a 429, so this answers rather than raises and the
+    caller closes the connection. Sharing the limiter with the HTTP
+    routes is the point - a subscription is as much a request as a
+    ``POST`` is, and it costs a poll every quarter second thereafter.
+
+    :param connection: The upgrade request, carrying the wired limiter.
+    :type connection: starlette.requests.HTTPConnection
+    :returns: ``True`` when the caller is within budget.
+    :rtype: bool
+    """
+    limiter: FixedWindowLimiter = connection.app.state.limiter
+    try:
+        limiter.check(_client_of(connection))
+    except RateLimited:
+        return False
+    return True
+
+
+__all__: list[str] = [
+    "FixedWindowLimiter",
+    "enforce_rate_limit",
+    "within_rate_limit",
+]

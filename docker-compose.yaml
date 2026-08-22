@@ -13,7 +13,13 @@ x-app-common: &app-common
   security_opt:
     - no-new-privileges:true
   pids_limit: 256
+  depends_on:
+    redis:
+      condition: service_healthy
   environment:
+    # Queued work lives in the sidecar below, reachable by service name.
+    JOB_BACKEND: ${JOB_BACKEND:-redis}
+    REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
     AUTH_MODE: ${AUTH_MODE:-basic}
     SEGMENTATION_USERNAME: ${SEGMENTATION_USERNAME:-}
     SEGMENTATION_PASSWORD: ${SEGMENTATION_PASSWORD:-}
@@ -96,6 +102,27 @@ services:
     group_add:
       - ${VIDEO_GID:-44}
       - ${RENDER_GID:-109}
+
+  # One queue for whichever profile is up: the API accepts jobs here
+  # and the worker inside the app claims them. No profile of its own, so
+  # `--profile cpu up` brings it along.
+  redis:
+    image: redis:8-alpine
+    restart: unless-stopped
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    # Payloads and results are reconstructible: a caller can resubmit.
+    # Persistence would only buy a restart's worth of queued work, at
+    # the cost of a writable volume on a read-only container.
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
 
 volumes:
   hf-cache: {}

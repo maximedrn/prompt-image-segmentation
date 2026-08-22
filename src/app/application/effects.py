@@ -1,20 +1,4 @@
-"""Effect vocabulary for this application.
-
-``stateless`` models an operation as ``Effect[Abilities, Error, Result]``,
-a ``Generator`` alias whose *sent* type is ``Any``. This module is the
-single place the project accommodates the library's two checker frictions
-(``SKILL.md`` section 23: isolate concessions in one small module rather
-than spreading ignores):
-
-1. ``stateless/__init__.py`` re-exports without ``__all__``, which strict
-   mode rejects, so imports come from the submodules.
-2. ``need()`` takes a runtime ``type[T]`` for its ``isinstance`` lookup,
-   but a capability is a ``Protocol``, which mypy refuses to pass as a
-   concrete type. The typed accessors below carry that one ignore each,
-   so use cases stay clean.
-
-Nothing else in the application imports ``stateless`` directly.
-"""
+"""Effect vocabulary for this application."""
 
 from collections.abc import Callable
 from typing import Never
@@ -28,7 +12,7 @@ from app.application.capabilities import (
     MaskRefiner,
     ObjectDetector,
 )
-from app.application.policies import SegmentationPolicy
+from app.application.policies import SegmentationPolicy, SegmentOptions
 from app.domain import (
     DeviceExhausted,
     FaceAnalysisUnavailable,
@@ -73,19 +57,19 @@ type Detect = Callable[
 
 type Refine = Callable[
     [SourceImage, tuple[PixelBox, ...]],
-    Try[DeviceExhausted, tuple[MaskArray, tuple[float, ...]]],
+    Try[DeviceExhausted, tuple[tuple[MaskArray, ...], tuple[float, ...]]],
 ]
 """Refinement with its device failure moved into the error channel."""
 
 
 type WiredSegment = Callable[
-    [SourceImage, Prompt, PersonPayload | None],
+    [SourceImage, Prompt, PersonPayload | None, SegmentOptions],
     Effect[Never, SegmentFailure, SegmentedImage],
 ]
 """The segmentation use case once every capability has been supplied."""
 
 type CaughtSegment = Callable[
-    [SourceImage, Prompt, PersonPayload | None],
+    [SourceImage, Prompt, PersonPayload | None, SegmentOptions],
     Success[SegmentedImage | SegmentFailure],
 ]
 """The same, with the error channel turned into a returned value."""
