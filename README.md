@@ -30,6 +30,7 @@ Prompt-driven image segmentation. Give it an image and any text prompt - get bac
 | CPU         | ✅     | ✅          | ✅     |
 | NVIDIA CUDA | ✅     | ✅ via WSL2 | ❌     |
 | AMD ROCm    | ✅     | ✅ via WSL2 | ❌     |
+| Intel XPU   | ✅     | ✅ via WSL2 | ❌     |
 
 ## Quickstart
 
@@ -38,16 +39,9 @@ Prompt-driven image segmentation. Give it an image and any text prompt - get bac
 ```bash
 cp .env.template .env
 
-docker compose --profile [cuda|rocm|cpu] up --build -d
+docker compose --profile [cuda|rocm|xpu|cpu] up --build -d
 # API: http://localhost:7860
 # Documentation: http://localhost:7860/docs
-```
-
-The published images are pulled by the commands above. To fetch one
-directly:
-
-```bash
-docker pull ghcr.io/maximedrn/prompt-image-segmentation:[cuda|rocm|cpu]
 ```
 
 ### Hugging Face Space
@@ -62,6 +56,8 @@ The Space builds this `Dockerfile`, so it needs three entries under
 ### Development
 
 ```bash
+cp .env.template .env
+
 poetry install --extras ui
 poetry run uvicorn app.interfaces.http:create_app \
     --factory \

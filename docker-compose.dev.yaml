@@ -1,8 +1,5 @@
 name: prompt-image-segmentation
 
-# One service per accelerator, selected with `--profile`. Metal is absent
-# on purpose: Docker Desktop for macOS exposes no GPU to containers, so
-# Apple Silicon runs natively (see the README).
 x-app-common: &app-common
   restart: unless-stopped
   init: true
@@ -53,11 +50,17 @@ x-app-common: &app-common
     start_period: ${MODEL_DOWNLOAD_GRACE:-15m}
     start_interval: 5s
 
+# Local tags, unqualified so nothing can push them by accident, and
+# `pull_policy: build` so an `up` without `--build` still picks up the
+# working tree instead of silently reaching for a registry.
+x-build-common: &build-common
+  pull_policy: build
+
 services:
   app-cpu:
-    <<: *app-common
+    <<: [*app-common, *build-common]
     profiles: ["cpu"]
-    image: ghcr.io/maximedrn/prompt-image-segmentation:cpu
+    image: prompt-image-segmentation:cpu
     build:
       context: .
       args:
@@ -67,9 +70,9 @@ services:
         ENABLE_UI: ${ENABLE_UI:-false}
 
   app-cuda:
-    <<: *app-common
+    <<: [*app-common, *build-common]
     profiles: ["cuda"]
-    image: ghcr.io/maximedrn/prompt-image-segmentation:cuda
+    image: prompt-image-segmentation:cuda
     build:
       context: .
       args:
@@ -86,9 +89,9 @@ services:
               capabilities: [gpu]
 
   app-rocm:
-    <<: *app-common
+    <<: [*app-common, *build-common]
     profiles: ["rocm"]
-    image: ghcr.io/maximedrn/prompt-image-segmentation:rocm
+    image: prompt-image-segmentation:rocm
     build:
       context: .
       args:
@@ -104,9 +107,9 @@ services:
       - ${RENDER_GID:-109}
 
   app-xpu:
-    <<: *app-common
+    <<: [*app-common, *build-common]
     profiles: ["xpu"]
-    image: ghcr.io/maximedrn/prompt-image-segmentation:xpu
+    image: prompt-image-segmentation:xpu
     build:
       context: .
       args:
@@ -127,7 +130,8 @@ services:
 
   # One queue for whichever profile is up: the API accepts jobs here
   # and the worker inside the app claims them. No profile of its own, so
-  # `--profile cpu up` brings it along.
+  # `--profile cpu up` brings it along. Upstream image: nothing in this
+  # repository builds it.
   redis:
     image: redis:8-alpine
     restart: unless-stopped

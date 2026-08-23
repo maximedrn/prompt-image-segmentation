@@ -94,6 +94,12 @@ RUN python -m compileall -q -j 0 "${VIRTUAL_ENV}"
 FROM ${BASE_IMAGE} AS runtime
 
 ARG ENABLE_UI
+# Extra distribution packages for the accelerator being built, empty for
+# every backend that needs none. CUDA and ROCm need none: their torch
+# wheels vendor the user-mode driver as pip dependencies. Intel is the
+# exception - the XPU wheels carry the SYCL runtime but not the Level
+# Zero driver that talks to the GPU, so that one comes from apt.
+ARG RUNTIME_PACKAGES=""
 
 ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONUNBUFFERED=1 \
@@ -117,7 +123,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \
     apt-get update && apt-get install -y --no-install-recommends \
-        libglib2.0-0 curl ca-certificates \
+        libglib2.0-0 curl ca-certificates ${RUNTIME_PACKAGES} \
     && groupadd --system --gid 1000 segmentation \
     && useradd --system --uid 1000 --gid segmentation --create-home \
         segmentation \

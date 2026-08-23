@@ -117,6 +117,12 @@ jobs:
             index: https://download.pytorch.org/whl/cu130
           - profile: rocm
             index: https://download.pytorch.org/whl/rocm7.1
+          - profile: xpu
+            index: https://download.pytorch.org/whl/xpu
+            # The Level Zero driver, absent from the XPU wheels. Kept in
+            # step with the `RUNTIME_PACKAGES` default in the compose
+            # files, which documents why it is needed.
+            packages: libze1 libze-intel-gpu1 intel-opencl-icd
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -143,7 +149,9 @@ jobs:
           context: .
           push: true
           provenance: false
-          build-args: TORCH_INDEX_URL=${{ matrix.index }}
+          build-args: |
+            TORCH_INDEX_URL=${{ matrix.index }}
+            RUNTIME_PACKAGES=${{ matrix.packages }}
           tags: |
             ghcr.io/${{ github.repository }}:${{ matrix.profile }}
             ghcr.io/${{ github.repository }}:${{ matrix.profile }}-${{ github.sha }}

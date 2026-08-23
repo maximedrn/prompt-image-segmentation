@@ -1,8 +1,9 @@
-"""Torch device and precision resolution (CUDA / ROCm / MPS / CPU).
+"""Torch device and precision resolution (CUDA / ROCm / XPU / MPS / CPU).
 
-Precedence: CUDA, then MPS, then CPU. ROCm builds of PyTorch expose their
-GPUs through the CUDA API too, so the CUDA branch catches both NVIDIA and
-AMD transparently.
+Precedence: CUDA, then XPU, then MPS, then CPU. ROCm builds of PyTorch
+expose their GPUs through the CUDA API too, so the CUDA branch catches
+both NVIDIA and AMD transparently. Intel GPUs do not: they have their own
+namespace, and only the XPU builds of torch carry it.
 """
 
 from contextlib import AbstractContextManager, nullcontext
@@ -17,11 +18,18 @@ from torch import (
     float32,
 )
 from torch.backends import mps as torch_mps
-from torch.cuda import is_available as cuda_is_available, is_bf16_supported
+from torch.cuda import (
+    is_available as cuda_is_available,
+    is_bf16_supported as cuda_is_bf16_supported,
+)
+from torch.xpu import (
+    is_available as xpu_is_available,
+    is_bf16_supported as xpu_is_bf16_supported,
+)
 
 from app.infrastructure.inference.types import DeviceType
 
-_FIRST_CUDA_INDEX: int = 0
+_FIRST_DEVICE_INDEX: int = 0
 
 
 def _mps_is_available() -> bool:
@@ -41,7 +49,9 @@ def get_device() -> TorchDevice:
     :rtype: torch.device
     """
     if cuda_is_available():
-        return TorchDevice(f"{DeviceType.CUDA}:{_FIRST_CUDA_INDEX}")
+        return TorchDevice(f"{DeviceType.CUDA}:{_FIRST_DEVICE_INDEX}")
+    if xpu_is_available():
+        return TorchDevice(f"{DeviceType.XPU}:{_FIRST_DEVICE_INDEX}")
     if _mps_is_available():
         return TorchDevice(DeviceType.MPS)
     return TorchDevice(DeviceType.CPU)
@@ -59,6 +69,8 @@ def get_model_dtype() -> TorchDtype:
 
     * CUDA / ROCm: ``bfloat16`` where the hardware supports it, else
       ``float16``.
+    * XPU: same rule, asked of Intel's own probe. Arc and Xe answer yes;
+      the older integrated parts answer no and get ``float16``.
     * MPS: ``float16`` only - ``bfloat16`` raises ``TypeError`` there.
     * CPU: ``float32`` - ``float16`` has no native CPU kernels.
 
@@ -67,7 +79,9 @@ def get_model_dtype() -> TorchDtype:
     """
     device: TorchDevice = get_device()
     if device.type == DeviceType.CUDA:
-        return bfloat16 if is_bf16_supported() else float16
+        return bfloat16 if cuda_is_bf16_supported() else float16
+    if device.type == DeviceType.XPU:
+        return bfloat16 if xpu_is_bf16_supported() else float16
     if device.type == DeviceType.MPS:
         return float16
     return float32
