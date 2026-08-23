@@ -57,7 +57,7 @@ services:
   app-cpu:
     <<: *app-common
     profiles: ["cpu"]
-    image: ghcr.io/maximedrn/prompt-image-segmentation:cpu
+    image: ghcr.io/maximedrn/prompt-image-segmentation/cpu
     build:
       context: .
       args:
@@ -69,7 +69,7 @@ services:
   app-cuda:
     <<: *app-common
     profiles: ["cuda"]
-    image: ghcr.io/maximedrn/prompt-image-segmentation:cuda
+    image: ghcr.io/maximedrn/prompt-image-segmentation/cuda
     build:
       context: .
       args:
@@ -88,7 +88,7 @@ services:
   app-rocm:
     <<: *app-common
     profiles: ["rocm"]
-    image: ghcr.io/maximedrn/prompt-image-segmentation:rocm
+    image: ghcr.io/maximedrn/prompt-image-segmentation/rocm
     build:
       context: .
       args:
@@ -106,7 +106,7 @@ services:
   app-xpu:
     <<: *app-common
     profiles: ["xpu"]
-    image: ghcr.io/maximedrn/prompt-image-segmentation:xpu
+    image: ghcr.io/maximedrn/prompt-image-segmentation/xpu
     build:
       context: .
       args:

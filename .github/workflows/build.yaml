@@ -153,8 +153,8 @@ jobs:
             TORCH_INDEX_URL=${{ matrix.index }}
             RUNTIME_PACKAGES=${{ matrix.packages }}
           tags: |
-            ghcr.io/${{ github.repository }}:${{ matrix.profile }}
-            ghcr.io/${{ github.repository }}:${{ matrix.profile }}-${{ github.sha }}
+            ghcr.io/${{ github.repository }}/${{ matrix.profile }}
+            ghcr.io/${{ github.repository }}/${{ matrix.profile }}:${{ github.sha }}
           cache-from: type=gha,scope=${{ matrix.profile }}
           cache-to: type=gha,mode=min,scope=${{ matrix.profile }}
 
