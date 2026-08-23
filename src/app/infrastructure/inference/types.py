@@ -10,7 +10,6 @@ class DeviceType(StrEnum):
     """Torch device families this application resolves between."""
 
     CUDA = "cuda"
-    XPU = "xpu"
     MPS = "mps"
     CPU = "cpu"
 

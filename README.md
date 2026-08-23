@@ -30,7 +30,6 @@ Prompt-driven image segmentation. Give it an image and any text prompt - get bac
 | CPU         | ✅     | ✅          | ✅     |
 | NVIDIA CUDA | ✅     | ✅ via WSL2 | ❌     |
 | AMD ROCm    | ✅     | ✅ via WSL2 | ❌     |
-| Intel XPU   | ✅     | ✅ via WSL2 | ❌     |
 
 ## Quickstart
 
@@ -39,7 +38,7 @@ Prompt-driven image segmentation. Give it an image and any text prompt - get bac
 ```bash
 cp .env.template .env
 
-docker compose --profile [cuda|rocm|xpu|cpu] up --build -d
+docker compose --profile [cuda|rocm|cpu] up --build -d
 # API: http://localhost:7860
 # Documentation: http://localhost:7860/docs
 ```

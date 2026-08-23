@@ -103,28 +103,6 @@ services:
       - ${VIDEO_GID:-44}
       - ${RENDER_GID:-109}
 
-  app-xpu:
-    <<: *app-common
-    profiles: ["xpu"]
-    image: ghcr.io/maximedrn/prompt-image-segmentation/xpu
-    build:
-      context: .
-      args:
-        TORCH_INDEX_URL: https://download.pytorch.org/whl/xpu
-        # The Level Zero driver, which the XPU wheels do not vendor. An
-        # override is offered because these are Debian trixie names and
-        # Intel has renamed the packages once already.
-        RUNTIME_PACKAGES: ${XPU_RUNTIME_PACKAGES:-libze1 libze-intel-gpu1 intel-opencl-icd}
-        # Installs the extra as well: enabling the UI at runtime needs
-        # the package to have been there at build time.
-        ENABLE_UI: ${ENABLE_UI:-false}
-    # Only the render node: Intel GPUs have no equivalent of /dev/kfd.
-    devices:
-      - /dev/dri:/dev/dri
-    group_add:
-      - ${VIDEO_GID:-44}
-      - ${RENDER_GID:-109}
-
   # One queue for whichever profile is up: the API accepts jobs here
   # and the worker inside the app claims them. No profile of its own, so
   # `--profile cpu up` brings it along.

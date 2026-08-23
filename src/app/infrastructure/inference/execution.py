@@ -6,14 +6,12 @@ from threading import Lock
 from typing import Final
 
 from torch import OutOfMemoryError, inference_mode
-from torch.cuda import empty_cache as cuda_empty_cache
-from torch.xpu import empty_cache as xpu_empty_cache
+from torch.cuda import empty_cache, is_available as cuda_is_available
 from transformers import PreTrainedModel
 
 from app.domain import DeviceExhausted, ModelUnavailable
 from app.infrastructure.inference.constants import InferenceText
 from app.infrastructure.inference.device import autocast_context, get_device
-from app.infrastructure.inference.types import DeviceType
 
 
 def fetching[ArtefactT](
@@ -62,15 +60,6 @@ def place[ModelT: PreTrainedModel](model: ModelT) -> ModelT:
 # a per-device semaphore only becomes worthwhile with a second device.
 _DEVICE_LOCK: Final[Lock] = Lock()
 
-# Which allocator to drain after an out-of-memory, per backend. Each one
-# lives in its own namespace and only exists for its own device, so this
-# cannot collapse into a single call. Backends absent from the table -
-# CPU above all - allocate through the host and have nothing to release.
-_CACHE_RELEASE: Final[dict[str, Callable[[], None]]] = {
-    DeviceType.CUDA: cuda_empty_cache,
-    DeviceType.XPU: xpu_empty_cache,
-}
-
 
 @contextmanager
 def exclusive_device(operation: str) -> Generator[None]:
@@ -88,11 +77,8 @@ def exclusive_device(operation: str) -> Generator[None]:
         try:
             yield
         except OutOfMemoryError as error:
-            release: Callable[[], None] | None = _CACHE_RELEASE.get(
-                get_device().type
-            )
-            if release is not None:
-                release()
+            if cuda_is_available():
+                empty_cache()
             raise DeviceExhausted(
                 detail=InferenceText.exhausted.format(
                     operation=operation, error=error
