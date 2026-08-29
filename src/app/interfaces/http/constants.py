@@ -23,6 +23,7 @@ class ErrorCode(StrEnum):
     UNKNOWN_BACKEND = "unknown_backend"
     UNKNOWN_JOB = "unknown_job"
     QUEUE_FULL = "queue_full"
+    IDEMPOTENCY_CONFLICT = "idempotency_conflict"
     ALREADY_STARTED = "already_started"
     INVALID_CALLBACK = "invalid_callback"
     INVALID_IMAGE = "invalid_image"
@@ -148,6 +149,9 @@ class HeaderName:
 
     retry_after: ClassVar[str] = "Retry-After"
     authenticate: ClassVar[str] = "WWW-Authenticate"
+    #: Read from the request, not set on the response. Named here with
+    #: the others because it is part of the same published contract.
+    idempotency_key: ClassVar[str] = "Idempotency-Key"
 
 
 @final
@@ -330,6 +334,10 @@ class JobMessage:
 
     unknown: ClassVar[str] = "No such job, or it has expired."
     queue_full: ClassVar[str] = "The queue is full. Retry shortly."
+    idempotency_conflict: ClassVar[str] = (
+        "This Idempotency-Key was already used for a different request. "
+        "Reuse the key only to retry the identical submission."
+    )
     store_unavailable: ClassVar[str] = (
         "The job store is unreachable. This is an outage, not your "
         "request: retry shortly."

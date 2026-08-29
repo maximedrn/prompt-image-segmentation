@@ -11,14 +11,23 @@ from time import time
 from typing import Annotated
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, Form, Request
+from fastapi import APIRouter, Depends, Form, Header, Request
 from fastapi.responses import JSONResponse
 
 from app.application.capabilities import JobStore
-from app.application.jobs import JobPayload
+from app.application.jobs import IdempotentRequest, JobPayload
 from app.application.policies import WebhookPolicy
 from app.bootstrap import Application
-from app.domain import Job, JobState, Prompt, UnknownBackend, cancel, queued
+from app.domain import (
+    Admission,
+    Job,
+    JobState,
+    Prompt,
+    UnknownBackend,
+    cancel,
+    queued,
+)
+from app.infrastructure.jobs.hashing import request_hash
 from app.infrastructure.webhooks.notifier import acceptable
 from app.interfaces.http.auth import require_credentials
 from app.interfaces.http.constants import (
@@ -84,13 +93,24 @@ def _failures(statuses: tuple[HTTPStatus, ...]) -> _Responses:
 async def create_job(
     request: Request,
     form: Annotated[SegmentForm, Form()],
+    idempotency_key: Annotated[
+        str | None, Header(alias=HeaderName.idempotency_key)
+    ] = None,
 ) -> JobSchema | JSONResponse:
     """Accept a segmentation and hand back something to poll.
+
+    A caller that supplies ``Idempotency-Key`` gets the same job back for
+    the same request, however many times a flaky connection makes them
+    send it. The same key with a *different* request is refused rather
+    than guessed at: whichever of the two the server picked would be
+    wrong for the other one.
 
     :param request: Incoming request.
     :type request: fastapi.Request
     :param form: The whole multipart body, already validated.
     :type form: app.interfaces.http.schemas.SegmentForm
+    :param idempotency_key: The caller's retry key, when they sent one.
+    :type idempotency_key: str | None
     :returns: The accepted job, or a failure response.
     :rtype: app.interfaces.http.schemas.JobSchema
         | fastapi.responses.JSONResponse
@@ -135,25 +155,74 @@ async def create_job(
     # the depth here first would add a round trip to every accepted job
     # to save one decode on the rare refused one.
     job: Job = queued(str(uuid4()), time())
-    position: int | None = await store.enqueue(
+    job_payload = JobPayload(
+        image=payload,
+        prompt=prompt.text,
+        backend=backend,
+        person_mode=form.person_mode,
+        options=form.to_options(),
+        callback_url=form.callback_url,
+    )
+    admission: Admission = await store.enqueue(
         job,
-        JobPayload(
-            image=payload,
-            prompt=prompt.text,
-            backend=backend,
-            person_mode=form.person_mode,
-            options=form.to_options(),
-            callback_url=form.callback_url,
+        job_payload,
+        idempotency=(
+            None
+            if idempotency_key is None
+            else IdempotentRequest(
+                key=idempotency_key,
+                request_hash=request_hash(job_payload),
+            )
         ),
     )
-    if position is None:
+    if admission.conflicted:
+        return failure_response(
+            HTTPStatus.CONFLICT,
+            ErrorCode.IDEMPOTENCY_CONFLICT,
+            JobMessage.idempotency_conflict,
+        )
+    if admission.replayed is not None:
+        # The first submission's job, as it stands now. Read rather than
+        # reconstructed: by the time a retry lands the job may already be
+        # running or finished, and answering with a fresh ``queued`` would
+        # tell the caller something that stopped being true.
+        return await _replayed(store, admission.replayed)
+    if admission.position is None:
         return failure_response(
             HTTPStatus.TOO_MANY_REQUESTS,
             ErrorCode.QUEUE_FULL,
             JobMessage.queue_full,
             headers={HeaderName.retry_after: str(RetryAfter.queue_full)},
         )
-    return JobSchema.of(job, queue_position=position)
+    return JobSchema.of(job, queue_position=admission.position)
+
+
+async def _replayed(
+    store: JobStore, identifier: str
+) -> JobSchema | JSONResponse:
+    """Answer a replay with the job the first submission created.
+
+    :param store: Where jobs are kept.
+    :type store: app.application.capabilities.JobStore
+    :param identifier: The job the key was spent on.
+    :type identifier: str
+    :returns: That job, or a failure if it has since expired.
+    :rtype: app.interfaces.http.schemas.JobSchema
+        | fastapi.responses.JSONResponse
+    """
+    if (found := await store.read(identifier)) is None:
+        # The claim outlived its job only if the job was purged early.
+        # Reporting it unknown is honest; inventing a fresh one would
+        # queue work the caller never asked for twice.
+        return failure_response(
+            HTTPStatus.NOT_FOUND, ErrorCode.UNKNOWN_JOB, JobMessage.unknown
+        )
+    job, result = found
+    return JobSchema.of(
+        job,
+        result=body_of(result),
+        queue_position=None if job.terminal else await store.depth(),
+    )
 
 
 @segmentation_router.get(

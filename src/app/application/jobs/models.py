@@ -33,6 +33,25 @@ class JobPayload:
 
 @final
 @dataclass(frozen=True, slots=True)
+class IdempotentRequest:
+    """The caller's claim that this submission is one they already made.
+
+    The hash is computed over what makes a request materially the same
+    -- the image, the prompt, the backend, the mode and the options --
+    and deliberately not over the callback URL or anything else the
+    caller cannot keep stable across an honest retry.
+
+    Only the digest travels and only the digest is stored. Two hashes
+    being equal is the whole question; the requests behind them are
+    never compared, so neither has to be kept.
+    """
+
+    key: str
+    request_hash: str
+
+
+@final
+@dataclass(frozen=True, slots=True)
 class JobResult:
     """What a finished job leaves behind for the caller to collect.
 
@@ -49,4 +68,4 @@ class JobResult:
     error: str | None = None
 
 
-__all__: list[str] = ["JobPayload", "JobResult"]
+__all__: list[str] = ["IdempotentRequest", "JobPayload", "JobResult"]

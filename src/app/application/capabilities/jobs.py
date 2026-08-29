@@ -3,8 +3,8 @@
 from abc import abstractmethod
 from typing import Protocol, runtime_checkable
 
-from app.application.jobs import JobPayload, JobResult
-from app.domain import Job
+from app.application.jobs import IdempotentRequest, JobPayload, JobResult
+from app.domain import Admission, Job
 
 
 @runtime_checkable
@@ -41,20 +41,31 @@ class JobStore(Protocol):
         """
 
     @abstractmethod
-    async def enqueue(self, job: Job, payload: JobPayload) -> int | None:
-        """Store a job and put it in line, unless the queue is full.
+    async def enqueue(
+        self,
+        job: Job,
+        payload: JobPayload,
+        idempotency: IdempotentRequest | None = None,
+    ) -> Admission:
+        """Store a job and put it in line, unless something says not to.
 
         Admission belongs here rather than in the caller: a depth read
         followed by a push lets two callers race past the same ceiling,
-        so the store is the only place that can refuse one of them.
+        so the store is the only place that can refuse one of them. The
+        idempotency claim is the same shape of problem and belongs in
+        the same place -- two identical submissions arriving together
+        would both pass a check made before this call.
 
         :param job: The freshly queued job.
         :type job: app.domain.Job
         :param payload: Everything the worker will need.
         :type payload: app.application.jobs.JobPayload
-        :returns: The caller's place in line, or ``None`` when the queue
-            was already at its configured depth.
-        :rtype: int | None
+        :param idempotency: The caller's key and request hash, when one
+            was supplied.
+        :type idempotency: app.application.jobs.IdempotentRequest | None
+        :returns: What became of the submission: queued, full, a replay
+            of an earlier one, or a conflict.
+        :rtype: app.domain.Admission
         """
 
     @abstractmethod

@@ -18,6 +18,7 @@ store at all.
 # pylint: disable=unused-variable
 
 from asyncio import run
+from dataclasses import replace
 from collections.abc import Awaitable, Callable
 from os import environ
 from typing import Final
@@ -27,11 +28,12 @@ from coredis import Redis
 from coredis.exceptions import RedisError
 
 from app.application.capabilities import JobStore
-from app.application.jobs import JobPayload, JobResult
+from app.application.jobs import IdempotentRequest, JobPayload, JobResult
 from app.application.jobs.results import SegmentSchema
 from app.application.policies import JobBackend, JobPolicy, SegmentOptions
-from app.domain import Job, JobState, cancel, queued, start, succeed
+from app.domain import Admission, Job, JobState, cancel, queued, start, succeed
 from app.infrastructure.jobs import build_store
+from app.infrastructure.jobs.hashing import request_hash
 from app.infrastructure.jobs.store import RedisJobStore, connect
 from tests.conftest import segment_body
 
@@ -39,6 +41,12 @@ URL: Final[str] = environ.get("REDIS_URL", "redis://localhost:6379/15")
 RETENTION: Final[int] = 60
 #: One accepted job, before anything claims it.
 ONE_JOB: Final[int] = 1
+#: Two, when a submission without a key is deliberately not deduplicated.
+TWO_JOBS: Final[int] = 2
+#: The front of the queue.
+FIRST_IN_LINE: Final[int] = 0
+FIRST_JOB: Final[str] = "first-job"
+SECOND_JOB: Final[str] = "second-job"
 DEPTH: Final[int] = 10
 ACCEPTED_AT: Final[float] = 1000.0
 STARTED_AT: Final[float] = 1001.0
@@ -271,7 +279,7 @@ def test_the_queue_ceiling_is_enforced_where_it_is_atomic(
         :param store: The store under test.
         :type store: app.application.capabilities.JobStore
         """
-        accepted: list[int | None] = [
+        accepted: list[Admission] = [
             await store.enqueue(
                 queued(f"job-{index}", ACCEPTED_AT), _payload()
             )
@@ -279,9 +287,9 @@ def test_the_queue_ceiling_is_enforced_where_it_is_atomic(
         ]
 
         # One place in line per accepted job, counted from the front.
-        assert accepted[:DEPTH] == list(range(DEPTH))
+        assert [one.position for one in accepted[:DEPTH]] == list(range(DEPTH))
         # Everything past the ceiling is refused rather than queued.
-        assert accepted[DEPTH:] == [None, None]
+        assert [one.queued for one in accepted[DEPTH:]] == [False, False]
         assert await store.depth() == DEPTH
 
     _scenario(scenario, backend)
@@ -302,10 +310,109 @@ def test_a_refused_job_leaves_nothing_behind(backend: JobBackend) -> None:
                 queued(f"filler-{index}", ACCEPTED_AT), _payload()
             )
 
-        assert (
-            await store.enqueue(queued("turned-away", ACCEPTED_AT), _payload())
-            is None
+        turned_away: Admission = await store.enqueue(
+            queued("turned-away", ACCEPTED_AT), _payload()
         )
+
+        assert not turned_away.queued
         assert await store.read("turned-away") is None
+
+    _scenario(scenario, backend)
+
+
+@BOTH_BACKENDS
+def test_an_identical_submission_replays_the_first_job(
+    backend: JobBackend,
+) -> None:
+    """The same key and the same request queue one job, not two."""
+
+    async def scenario(store: JobStore) -> None:
+        """Drive the store.
+
+        :param store: The store under test.
+        :type store: app.application.capabilities.JobStore
+        """
+        payload: JobPayload = _payload()
+        claim = IdempotentRequest(
+            key="retry-key", request_hash=request_hash(payload)
+        )
+
+        first: Admission = await store.enqueue(
+            queued(FIRST_JOB, ACCEPTED_AT), payload, idempotency=claim
+        )
+        second: Admission = await store.enqueue(
+            queued(SECOND_JOB, ACCEPTED_AT), payload, idempotency=claim
+        )
+
+        assert first.position == FIRST_IN_LINE
+        # The second is answered with the first job, and nothing else
+        # was queued: a retried POST must not double the work.
+        assert second.replayed == FIRST_JOB
+        assert not second.queued
+        assert await store.depth() == ONE_JOB
+        assert await store.read(SECOND_JOB) is None
+
+    _scenario(scenario, backend)
+
+
+@BOTH_BACKENDS
+def test_a_spent_key_on_a_different_request_conflicts(
+    backend: JobBackend,
+) -> None:
+    """Reusing a key for other work is refused, not guessed at."""
+
+    async def scenario(store: JobStore) -> None:
+        """Drive the store.
+
+        :param store: The store under test.
+        :type store: app.application.capabilities.JobStore
+        """
+        first: JobPayload = _payload()
+        other: JobPayload = replace(first, prompt="something else entirely")
+
+        await store.enqueue(
+            queued(FIRST_JOB, ACCEPTED_AT),
+            first,
+            idempotency=IdempotentRequest(
+                key="shared-key", request_hash=request_hash(first)
+            ),
+        )
+        clash: Admission = await store.enqueue(
+            queued("other-job", ACCEPTED_AT),
+            other,
+            idempotency=IdempotentRequest(
+                key="shared-key", request_hash=request_hash(other)
+            ),
+        )
+
+        # Whichever of the two the server picked would be wrong for the
+        # other one, so it picks neither.
+        assert clash.conflicted
+        assert not clash.queued
+        assert clash.replayed is None
+        assert await store.depth() == ONE_JOB
+
+    _scenario(scenario, backend)
+
+
+@BOTH_BACKENDS
+def test_a_submission_without_a_key_is_never_deduplicated(
+    backend: JobBackend,
+) -> None:
+    """Idempotency is opt-in; two plain POSTs are two jobs."""
+
+    async def scenario(store: JobStore) -> None:
+        """Drive the store.
+
+        :param store: The store under test.
+        :type store: app.application.capabilities.JobStore
+        """
+        payload: JobPayload = _payload()
+
+        await store.enqueue(queued("plain-one", ACCEPTED_AT), payload)
+        await store.enqueue(queued("plain-two", ACCEPTED_AT), payload)
+
+        assert await store.depth() == TWO_JOBS
+        assert await store.read("plain-two") is not None
 
     _scenario(scenario, backend)

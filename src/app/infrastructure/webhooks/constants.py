@@ -34,6 +34,11 @@ class DeliveryField:
     here rather than inline where a rename would go unnoticed.
     """
 
+    #: Unique per terminal event, and the same across every attempt at
+    #: delivering it. The receiver deduplicates on this, so a fresh one
+    #: per attempt would turn a retry into new work in the very inbox it
+    #: exists to feed.
+    event_id: ClassVar[str] = "eventId"
     identifier: ClassVar[str] = "identifier"
     state: ClassVar[str] = "state"
     error: ClassVar[str] = "error"

@@ -13,6 +13,11 @@ class JobKeys:
     payload: ClassVar[str] = "job:payload:"
     image: ClassVar[str] = "job:image:"
     result: ClassVar[str] = "job:result:"
+    #: One per idempotency key, holding the request hash and the job the
+    #: first submission created. Carries the same TTL as the job it
+    #: names: a record outliving its job would answer a replay with an
+    #: identifier that no longer resolves.
+    idempotency: ClassVar[str] = "job:idempotency:"
     queue: ClassVar[str] = "jobs:queue"
 
 

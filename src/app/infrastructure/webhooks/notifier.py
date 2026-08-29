@@ -30,6 +30,7 @@ from socket import AF_INET, AF_INET6, SOCK_STREAM, getaddrinfo
 from time import time
 from typing import Final, final
 from urllib.parse import urlparse
+from uuid import uuid4
 
 from anyio import to_thread
 from httpx import AsyncClient, HTTPError, Response
@@ -164,7 +165,10 @@ class SignedWebhookNotifier:
                 job.identifier,
             )
             return
-        body: bytes = _document(job, result)
+        # Minted once, outside the retry loop below: every attempt at
+        # this event carries the same identifier, which is what lets a
+        # receiver tell a redelivery from a second event.
+        body: bytes = _document(job, result, str(uuid4()))
         stamp: int = int(time())
         headers: dict[str, str] = {
             WebhookRules.signature_header: sign(
@@ -208,17 +212,29 @@ class SignedWebhookNotifier:
         )
 
 
-def _document(job: Job, result: JobResult | None) -> bytes:
+def _document(job: Job, result: JobResult | None, event_id: str) -> bytes:
     """Serialise what a receiver is told about a finished job.
+
+    ``event_id`` is taken rather than minted here: it must be the same
+    for every attempt at one event, and a function that generated it
+    would give each retry its own -- which is the one thing the field
+    exists to prevent.
+
+    It travels inside the body, so it is signed. A header would let a
+    replay present a fresh identifier for an old body, and the receiver
+    would admit a recording as new work.
 
     :param job: The finished job.
     :type job: app.domain.Job
     :param result: What it produced, if anything.
     :type result: app.application.jobs.JobResult | None
+    :param event_id: Identity of this terminal event.
+    :type event_id: str
     :returns: The exact bytes that will be signed and sent.
     :rtype: bytes
     """
     return dumps({
+        DeliveryField.event_id: event_id,
         DeliveryField.identifier: job.identifier,
         DeliveryField.state: job.state.value,
         DeliveryField.error: job.error,

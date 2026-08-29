@@ -33,14 +33,15 @@ from collections.abc import AsyncGenerator
 from contextlib import AsyncExitStack, asynccontextmanager
 from typing import Self, final
 
-from coredis import Redis
+from coredis import PureToken, Redis
 from coredis.exceptions import RedisError
 from pydantic import BaseModel, ConfigDict
 
 from app.application.jobs import JobPayload, JobResult
 from app.application.jobs.results import SegmentSchema
 from app.application.policies import JobPolicy, SegmentOptions
-from app.domain import Job, JobState, JobStoreUnavailable
+from app.application.jobs import IdempotentRequest
+from app.domain import Admission, Job, JobState, JobStoreUnavailable
 from app.infrastructure.imaging.types import TextEncoding
 from app.infrastructure.jobs.constants import Claiming, JobKeys
 
@@ -114,6 +115,23 @@ class _PayloadDocument(BaseModel):
             options=self.options,
             callback_url=self.callback_url,
         )
+
+
+@final
+class _IdempotencyDocument(BaseModel):
+    """What one spent idempotency key remembers.
+
+    The hash is what tells a replay from a conflict: the same key with
+    the same request is the client retrying, and with a different one it
+    is a client reusing a key it should not have. Only the hash is kept,
+    never the request -- comparing digests answers the question, and
+    storing the payload twice would double what an abandoned key costs.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    request_hash: str
+    identifier: str
 
 
 @final
@@ -247,8 +265,13 @@ class RedisJobStore:
             return False
         return True
 
-    async def enqueue(self, job: Job, payload: JobPayload) -> int | None:
-        """Store a job and put it in line, unless the queue is full.
+    async def enqueue(
+        self,
+        job: Job,
+        payload: JobPayload,
+        idempotency: IdempotentRequest | None = None,
+    ) -> Admission:
+        """Store a job and put it in line, unless something says not to.
 
         One transaction, and the queue entry is the last thing in it:
         a worker can never pop an identifier whose payload is not yet
@@ -259,18 +282,49 @@ class RedisJobStore:
         depth read beforehand, which two callers racing at the ceiling
         would both pass. Whoever lands past it takes itself back out.
 
+        The idempotency claim is decided the same way and for the same
+        reason. ``SET NX`` is inside the transaction, and its answer --
+        not a read before it -- is what says whether this caller owns the
+        key: two identical submissions arriving together would both pass
+        a check-then-act, and both would queue a job.
+
+        Losing the claim is not yet a replay. The stored hash decides:
+        equal means the first submission was this one, and the job it
+        created is handed back; different means the key was spent on
+        another request, which is refused rather than guessed at.
+
         :param job: The freshly queued job.
         :type job: app.domain.Job
         :param payload: Everything the worker will need.
         :type payload: app.application.jobs.JobPayload
-        :returns: The caller's place in line, or ``None`` when the queue
-            was already at its configured depth.
-        :rtype: int | None
+        :param idempotency: The caller's key and request hash, when one
+            was supplied.
+        :type idempotency: IdempotentRequest | None
+        :returns: What became of the submission.
+        :rtype: app.domain.Admission
         """
         job_key, payload_key, image_key, _ = self._keys(job.identifier)
         ttl: int = self._policy.retention_seconds
+        claim_key: str | None = (
+            None
+            if idempotency is None
+            else f"{JobKeys.idempotency}{idempotency.key}"
+        )
         async with _reachable():
             async with self._client.pipeline(transaction=True) as batch:
+                claimed = (
+                    None
+                    if claim_key is None or idempotency is None
+                    else batch.set(
+                        claim_key,
+                        _IdempotencyDocument(
+                            request_hash=idempotency.request_hash,
+                            identifier=job.identifier,
+                        ).model_dump_json(),
+                        condition=PureToken.NX,
+                        ex=ttl,
+                    )
+                )
                 batch.set(
                     job_key, _JobDocument.of(job).model_dump_json(), ex=ttl
                 )
@@ -282,9 +336,58 @@ class RedisJobStore:
                 batch.set(image_key, payload.image, ex=ttl)
                 pushed = batch.rpush(JobKeys.queue, [job.identifier])
             length: int = await pushed
+            if claimed is not None and not await claimed:
+                # Everything the transaction wrote comes back out, not
+                # just the queue entry. Leaving the documents for the TTL
+                # to collect would leave a readable job that nothing will
+                # ever run -- a caller polling the identifier it was
+                # never given would find one queued forever.
+                await self._discard(job.identifier)
+                return await self._settle(claim_key, idempotency)
         if (position := length - 1) < self._policy.max_queue_depth:
-            return position
-        return await self._withdraw(job.identifier, position)
+            return Admission.accepted(position)
+        withdrawn: int | None = await self._withdraw(job.identifier, position)
+        return (
+            Admission.full()
+            if withdrawn is None
+            else Admission.accepted(withdrawn)
+        )
+
+    async def _discard(self, identifier: str) -> None:
+        """Remove every trace of a job that was never really admitted.
+
+        :param identifier: The job to erase.
+        :type identifier: str
+        """
+        job_key, payload_key, image_key, result_key = self._keys(identifier)
+        await self._client.lrem(JobKeys.queue, 1, identifier)
+        await self._client.delete(
+            [job_key, payload_key, image_key, result_key]
+        )
+
+    async def _settle(
+        self, claim_key: str | None, idempotency: IdempotentRequest | None
+    ) -> Admission:
+        """Decide what a lost idempotency claim means.
+
+        :param claim_key: The Redis key the claim was made under.
+        :type claim_key: str | None
+        :param idempotency: What this caller offered.
+        :type idempotency: IdempotentRequest | None
+        :returns: A replay of the first job, or a conflict.
+        :rtype: app.domain.Admission
+        """
+        if claim_key is None or idempotency is None:
+            return Admission.conflict()
+        if (stored := await self._client.get(claim_key)) is None:
+            # The claim expired between losing it and reading it. Racing
+            # an expiry is not a conflict, and refusing here would fail a
+            # request nothing is wrong with.
+            return Admission.conflict()
+        record = _IdempotencyDocument.model_validate_json(stored)
+        if record.request_hash != idempotency.request_hash:
+            return Admission.conflict()
+        return Admission.replay(record.identifier)
 
     async def _withdraw(self, identifier: str, position: int) -> int | None:
         """Take back a job the queue turned out to have no room for.

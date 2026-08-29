@@ -21,9 +21,9 @@ from dataclasses import dataclass
 from time import monotonic, time
 from typing import final
 
-from app.application.jobs import JobPayload, JobResult
+from app.application.jobs import IdempotentRequest, JobPayload, JobResult
 from app.application.policies import JobPolicy
-from app.domain import Job, JobState
+from app.domain import Admission, Job, JobState
 from app.infrastructure.jobs.constants import Claiming
 
 
@@ -39,6 +39,21 @@ class _Entry:
 
 
 @final
+@dataclass(slots=True)
+class _Claim:
+    """One spent idempotency key, and what it was spent on.
+
+    Expires with the job it names, like every other entry here: a claim
+    outliving its job would answer a replay with an identifier that has
+    already been purged.
+    """
+
+    request_hash: str
+    identifier: str
+    expires_at: float
+
+
+@final
 class InMemoryJobStore:
     """Keeps jobs in this process, and only for as long as it runs."""
 
@@ -50,6 +65,7 @@ class InMemoryJobStore:
         """
         self._policy: JobPolicy = policy
         self._entries: dict[str, _Entry] = {}
+        self._claims: dict[str, _Claim] = {}
         self._queue: deque[str] = deque()
         # Lets ``claim`` sleep until there is work rather than poll for
         # it, which is what keeps an idle worker off the CPU.
@@ -71,6 +87,15 @@ class InMemoryJobStore:
             for identifier in self._queue
             if identifier not in expired
         )
+        # Claims expire on their own clock rather than with the entries
+        # above: a claim outlives nothing, but a job cancelled early
+        # would otherwise take its claim with it and let the same key
+        # queue a second job.
+        self._claims = {
+            key: claim
+            for key, claim in self._claims.items()
+            if claim.expires_at > now
+        }
 
     def _expiry(self) -> float:
         return time() + self._policy.retention_seconds
@@ -95,24 +120,40 @@ class InMemoryJobStore:
         """
         return True
 
-    async def enqueue(self, job: Job, payload: JobPayload) -> int | None:
-        """Store a job and put it in line, unless the queue is full.
+    async def enqueue(
+        self,
+        job: Job,
+        payload: JobPayload,
+        idempotency: IdempotentRequest | None = None,
+    ) -> Admission:
+        """Store a job and put it in line, unless something says not to.
 
         Admission and storage cannot interleave here: there is no await
         between the depth check and the append, so the event loop cannot
-        hand another request the same place in line.
+        hand another request the same place in line. The idempotency
+        claim is decided in the same uninterrupted stretch, and for the
+        same reason.
 
         :param job: The freshly queued job.
         :type job: app.domain.Job
         :param payload: Everything the worker will need.
         :type payload: app.application.jobs.JobPayload
-        :returns: The caller's place in line, or ``None`` when the queue
-            was already at its configured depth.
-        :rtype: int | None
+        :param idempotency: The caller's key and request hash, when one
+            was supplied.
+        :type idempotency: app.application.jobs.IdempotentRequest | None
+        :returns: What became of the submission.
+        :rtype: app.domain.Admission
         """
         self._purge()
+        if idempotency is not None:
+            if (spent := self._claims.get(idempotency.key)) is not None:
+                return (
+                    Admission.replay(spent.identifier)
+                    if spent.request_hash == idempotency.request_hash
+                    else Admission.conflict()
+                )
         if (position := len(self._queue)) >= self._policy.max_queue_depth:
-            return None
+            return Admission.full()
         self._entries[job.identifier] = _Entry(
             job=job,
             payload=payload,
@@ -120,8 +161,14 @@ class InMemoryJobStore:
             expires_at=self._expiry(),
         )
         self._queue.append(job.identifier)
+        if idempotency is not None:
+            self._claims[idempotency.key] = _Claim(
+                request_hash=idempotency.request_hash,
+                identifier=job.identifier,
+                expires_at=self._expiry(),
+            )
         self._arrived.set()
-        return position
+        return Admission.accepted(position)
 
     def _take(self) -> tuple[Job, JobPayload] | None:
         # A cancelled job is skipped rather than run: cancellation only

@@ -25,6 +25,7 @@ from app.domain.errors import (
     UnknownBackend,
     UploadTooLarge,
 )
+from app.domain.jobs.admission import Admission
 from app.domain.jobs.constants import Lifecycle
 from app.domain.jobs.models import Job
 from app.domain.jobs.rules import cancel, fail, queued, start, succeed
@@ -72,6 +73,7 @@ __all__: list[str] = [
     "IllegalTransition",
     "ImageDecodeFailed",
     "ImageFormat",
+    "Admission",
     "ImageMode",
     "InvalidPrompt",
     "JobStoreUnavailable",
