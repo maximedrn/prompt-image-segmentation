@@ -102,6 +102,10 @@ class Settings(BaseSettings):
         default=Defaults.WEBHOOK_ALLOW_INSECURE,
         alias=EnvVar.WEBHOOK_ALLOW_INSECURE,
     )
+    webhook_allow_private_hosts: bool = Field(
+        default=Defaults.WEBHOOK_ALLOW_PRIVATE_HOSTS,
+        alias=EnvVar.WEBHOOK_ALLOW_PRIVATE_HOSTS,
+    )
     max_upload_bytes: int = Field(
         default=Defaults.MAX_UPLOAD_BYTES, alias=EnvVar.MAX_UPLOAD_BYTES
     )
@@ -212,6 +216,7 @@ class Settings(BaseSettings):
             max_attempts=self.webhook_max_attempts,
             initial_backoff_seconds=self.webhook_initial_backoff_seconds,
             allow_insecure=self.webhook_allow_insecure,
+            allow_private_hosts=self.webhook_allow_private_hosts,
         )
 
     def detection_policy(self) -> DetectionPolicy:

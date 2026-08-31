@@ -58,7 +58,7 @@ jobs:
       - name: Lint
         run: poetry run pylint src tests
       - name: Spelling
-        run: npx --yes cspell --no-progress "src/**/*.py" "tests/**/*.py" "*.md"
+        run: poetry run poe spell
 
       # The slow suite loads several hundred megabytes of weights; it runs
       # in `models`, which caches them.

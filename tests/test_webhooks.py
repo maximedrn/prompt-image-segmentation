@@ -57,7 +57,9 @@ BASE_POLICY: Final[WebhookPolicy] = WebhookPolicy(
 )
 
 
-def _policy(*, allow_insecure: bool = False) -> WebhookPolicy:
+def _policy(
+    *, allow_insecure: bool = False, allow_private_hosts: bool = False
+) -> WebhookPolicy:
     """Build a policy that retries fast enough for a test.
 
     ``replace`` rather than a mapping of field names: the policy is a
@@ -65,10 +67,16 @@ def _policy(*, allow_insecure: bool = False) -> WebhookPolicy:
 
     :param allow_insecure: Whether plain http is accepted.
     :type allow_insecure: bool
+    :param allow_private_hosts: Whether internal addresses are accepted.
+    :type allow_private_hosts: bool
     :returns: The policy.
     :rtype: app.application.policies.WebhookPolicy
     """
-    return replace(BASE_POLICY, allow_insecure=allow_insecure)
+    return replace(
+        BASE_POLICY,
+        allow_insecure=allow_insecure,
+        allow_private_hosts=allow_private_hosts,
+    )
 
 
 def _finished() -> Job:
@@ -127,6 +135,24 @@ def test_internal_and_insecure_destinations_are_refused(url: str) -> None:
 def test_a_public_https_destination_is_accepted() -> None:
     """The guard refuses the dangerous, not everything."""
     assert run(acceptable(PUBLIC_URL, _policy())) is True
+
+
+def test_a_private_host_is_reached_only_when_an_operator_says_so() -> None:
+    """The escape hatch a single-network stack needs, and its default.
+
+    The guard exists to stop a caller aiming the service at what only
+    it can reach. An operator who runs the whole stack on one private
+    network and says so is the case that is not.
+    """
+    assert run(acceptable("https://127.0.0.1/hook", _policy())) is False
+    assert (
+        run(
+            acceptable(
+                "https://127.0.0.1/hook", _policy(allow_private_hosts=True)
+            )
+        )
+        is True
+    )
 
 
 def test_plain_http_is_accepted_only_when_an_operator_says_so() -> None:

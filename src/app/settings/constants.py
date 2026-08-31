@@ -45,6 +45,7 @@ class EnvVar:
         "WEBHOOK_INITIAL_BACKOFF_SECONDS"
     )
     WEBHOOK_ALLOW_INSECURE: ClassVar[str] = "WEBHOOK_ALLOW_INSECURE"
+    WEBHOOK_ALLOW_PRIVATE_HOSTS: ClassVar[str] = "WEBHOOK_ALLOW_PRIVATE_HOSTS"
     MAX_UPLOAD_BYTES: ClassVar[str] = "MAX_UPLOAD_BYTES"
     MAX_IMAGE_PIXELS: ClassVar[str] = "MAX_IMAGE_PIXELS"
     RATE_LIMIT_REQUESTS: ClassVar[str] = "RATE_LIMIT_REQUESTS"
@@ -108,6 +109,10 @@ class Defaults:
     #: Only reasonable inside a private network, where the receiver
     #: has no certificate of its own.
     WEBHOOK_ALLOW_INSECURE: ClassVar[bool] = False
+    #: Off. The service makes the callback request itself, so a caller
+    #: naming the address chooses what it reaches. Only a stack where
+    #: every caller is one you control should turn this on.
+    WEBHOOK_ALLOW_PRIVATE_HOSTS: ClassVar[bool] = False
 
     #: 20 MiB of encoded image. Uvicorn has no body limit of its own, so
     #: this is the only thing between an upload and the heap.

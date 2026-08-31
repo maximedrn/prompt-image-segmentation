@@ -18,6 +18,8 @@ pre-commit:
     pytest:
       glob: "{src,tests}/**/*.py"
       run: poetry run pytest -m "not slow"
+    # Whole-tree, like pylint and mypy above: no glob to keep in step
+    # with the task, and no global cspell install to keep - the venv's
+    # npx runs it.
     cspell:
-      glob: "*.{py,md,toml,yaml,yml}"
-      run: cspell --no-progress --no-summary {staged_files}
+      run: poetry run poe spell

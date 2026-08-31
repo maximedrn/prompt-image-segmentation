@@ -1707,6 +1707,40 @@ files = [
 ]
 
 [[package]]
+name = "nodejs-wheel"
+version = "24.19.0"
+description = "unoffical Node.js package"
+optional = false
+python-versions = ">=3.7"
+groups = ["dev"]
+files = [
+    {file = "nodejs_wheel-24.19.0-py3-none-any.whl", hash = "sha256:9bec7369a0b364e041bd129be385fdb29fb77efb7a8fbf0eb35752e8f841a9a8"},
+    {file = "nodejs_wheel-24.19.0.tar.gz", hash = "sha256:ff479430d3ed9b964e7c44dce7a8b40aaa58c7fe8466acc883195477a93f0c44"},
+]
+
+[package.dependencies]
+nodejs-wheel-binaries = "24.19.0"
+
+[[package]]
+name = "nodejs-wheel-binaries"
+version = "24.19.0"
+description = "unoffical Node.js package"
+optional = false
+python-versions = ">=3.7"
+groups = ["dev"]
+files = [
+    {file = "nodejs_wheel_binaries-24.19.0-py2.py3-none-macosx_13_0_arm64.whl", hash = "sha256:e12cbfd69089504e42fb14194ce734a9dcf3eb38c820ca63dd511d36fb964e9c"},
+    {file = "nodejs_wheel_binaries-24.19.0-py2.py3-none-macosx_13_0_x86_64.whl", hash = "sha256:1c890adf4b7e6556ccc1ca66c866bb81884b6c9a581dee4e530dc7f78fb9d514"},
+    {file = "nodejs_wheel_binaries-24.19.0-py2.py3-none-manylinux_2_28_aarch64.whl", hash = "sha256:4e029dadfae1295876063c96b236f673487e8c27379fe146c1e2250283520227"},
+    {file = "nodejs_wheel_binaries-24.19.0-py2.py3-none-manylinux_2_28_x86_64.whl", hash = "sha256:4196a947bcc883f2003ab101762d729f3e99b5e86b75bd09151563403e2eceb8"},
+    {file = "nodejs_wheel_binaries-24.19.0-py2.py3-none-musllinux_1_2_aarch64.whl", hash = "sha256:352e048ab4dd35e7de5f338d1cc4fcbf77a0e93da30bf7336a8217ee246b31d7"},
+    {file = "nodejs_wheel_binaries-24.19.0-py2.py3-none-musllinux_1_2_x86_64.whl", hash = "sha256:28d078b2ced9e2069516e652dc4b1380e7a1a7f2d3934eccd1611586d283ba4c"},
+    {file = "nodejs_wheel_binaries-24.19.0-py2.py3-none-win_amd64.whl", hash = "sha256:67e3abeb9c3830cae8c8487ae8a2af7cc27dfa75af06145cee5ca7d1857c81bd"},
+    {file = "nodejs_wheel_binaries-24.19.0-py2.py3-none-win_arm64.whl", hash = "sha256:d9074c665ea68b04e183d82482c86dc907d3a9bd15eb6cf85542cb785266bb36"},
+    {file = "nodejs_wheel_binaries-24.19.0.tar.gz", hash = "sha256:db217eef8cab8551667863379b08db4d9067403f6cbbe87481eb40edceb8aa9b"},
+]
+
+[[package]]
 name = "nuitka"
 version = "4.1.3"
 description = "Python compiler with full language support and CPython compatibility"
@@ -4180,4 +4214,4 @@ ui = ["gradio"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.13,<3.14"
-content-hash = "6a39745e5a8d255d4a96b2cef92dfa9e369344f15f44e77aeffa1669b7e86a9d"
+content-hash = "645850af241c98c00d1903f431419deec95a3dce3a85898d63beb0b3defacaa6"

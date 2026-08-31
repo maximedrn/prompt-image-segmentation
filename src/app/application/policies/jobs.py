@@ -42,6 +42,12 @@ class WebhookPolicy:
     #: Plain HTTP is refused unless an operator says otherwise, which is
     #: only reasonable inside a private network.
     allow_insecure: bool = False
+    #: Internal addresses are refused unless an operator says otherwise.
+    #: The service makes the callback request itself, so a caller who
+    #: names the address chooses what it reaches. Turn this on only
+    #: where every caller is one you control -- a local or CI stack
+    #: whose receiver has no public name is the case it exists for.
+    allow_private_hosts: bool = False
 
     @property
     def enabled(self) -> bool:

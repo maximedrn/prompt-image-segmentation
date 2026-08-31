@@ -102,6 +102,11 @@
     "xyxy",
     "YuNet"
   ],
+  // ``poe spell`` walks the whole tree, so this list is the only place
+  // deciding what goes unchecked. Dot-entries (``.venv``, ``.github``,
+  // ``.env``) and binaries (the PNGs under ``examples``) are already out
+  // via cspell's own defaults; the caches are repeated here so no
+  // explicit path can drag them back in.
   "ignorePaths": [
     "**/.venv/**",
     "**/.mypy_cache/**",

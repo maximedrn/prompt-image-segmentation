@@ -265,6 +265,8 @@ async def acceptable(url: str, policy: WebhookPolicy) -> bool:
         return False
     if not parsed.hostname:
         return False
+    if policy.allow_private_hosts:
+        return True
     # Resolution blocks, and this runs on the event loop that is also
     # accepting requests.
     return await to_thread.run_sync(_reachable, parsed.hostname)

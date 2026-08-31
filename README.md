@@ -202,3 +202,4 @@ Withdraws a job that has not started. A running one answers `409`: the accelerat
 | `poetry run poe test`                | Full suite                         |
 | `poetry run pytest -m "not slow"`    | Fast suite, no model loading       |
 | `poetry run poe audit`               | `pip-audit`                        |
+| `poetry run poe spell`               | cspell over the tree               |

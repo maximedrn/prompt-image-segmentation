@@ -406,7 +406,7 @@ def test_a_spent_key_on_a_different_request_conflicts(
 
 
 @BOTH_BACKENDS
-def test_one_callers_key_cannot_answer_anothers_submission(
+def test_one_callers_key_cannot_answer_another_submission(
     backend: JobBackend,
 ) -> None:
     """A key is a string the caller picks, not a name they own.
