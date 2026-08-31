@@ -44,10 +44,16 @@ class IdempotentRequest:
     Only the digest travels and only the digest is stored. Two hashes
     being equal is the whole question; the requests behind them are
     never compared, so neither has to be kept.
+
+    The scope is who is claiming, not what they claimed. The key is a
+    string the caller picks, so two callers picking the same one would
+    otherwise share a ledger entry -- and the second would be handed
+    the first's job.
     """
 
     key: str
     request_hash: str
+    scope: str
 
 
 @final

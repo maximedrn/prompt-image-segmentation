@@ -63,6 +63,10 @@ BOTH_BACKENDS = pytest.mark.parametrize(
 )
 
 
+#: One caller, since these scenarios are about keys and not identity.
+SCOPE: Final[str] = "scope-a"
+
+
 def _payload() -> JobPayload:
     """Build a payload worth round-tripping.
 
@@ -334,7 +338,9 @@ def test_an_identical_submission_replays_the_first_job(
         """
         payload: JobPayload = _payload()
         claim = IdempotentRequest(
-            key="retry-key", request_hash=request_hash(payload)
+            key="retry-key",
+            request_hash=request_hash(payload),
+            scope=SCOPE,
         )
 
         first: Admission = await store.enqueue(
@@ -374,14 +380,18 @@ def test_a_spent_key_on_a_different_request_conflicts(
             queued(FIRST_JOB, ACCEPTED_AT),
             first,
             idempotency=IdempotentRequest(
-                key="shared-key", request_hash=request_hash(first)
+                key="shared-key",
+                request_hash=request_hash(first),
+                scope=SCOPE,
             ),
         )
         clash: Admission = await store.enqueue(
             queued("other-job", ACCEPTED_AT),
             other,
             idempotency=IdempotentRequest(
-                key="shared-key", request_hash=request_hash(other)
+                key="shared-key",
+                request_hash=request_hash(other),
+                scope=SCOPE,
             ),
         )
 
@@ -391,6 +401,56 @@ def test_a_spent_key_on_a_different_request_conflicts(
         assert not clash.queued
         assert clash.replayed is None
         assert await store.depth() == ONE_JOB
+
+    _scenario(scenario, backend)
+
+
+@BOTH_BACKENDS
+def test_one_callers_key_cannot_answer_anothers_submission(
+    backend: JobBackend,
+) -> None:
+    """A key is a string the caller picks, not a name they own.
+
+    Two callers picking the same one is not a retry, and handing the
+    second the first's job would hand them someone else's work.
+
+    :param backend: Store implementation under test.
+    :type backend: tests.conftest.JobBackend
+    """
+
+    async def scenario(store: JobStore) -> None:
+        """Race one key across two callers.
+
+        :param store: Store under test.
+        :type store: app.application.jobs.JobStore
+        """
+        payload: JobPayload = _payload()
+
+        mine: Admission = await store.enqueue(
+            queued(FIRST_JOB, ACCEPTED_AT),
+            payload,
+            idempotency=IdempotentRequest(
+                key="shared-key",
+                request_hash=request_hash(payload),
+                scope="caller-a",
+            ),
+        )
+        theirs: Admission = await store.enqueue(
+            queued("other-job", ACCEPTED_AT),
+            payload,
+            idempotency=IdempotentRequest(
+                key="shared-key",
+                request_hash=request_hash(payload),
+                scope="caller-b",
+            ),
+        )
+
+        # Queued, not replayed: the other caller's ledger entry is not
+        # theirs to be answered from.
+        assert mine.queued
+        assert theirs.queued
+        assert theirs.replayed is None
+        assert await store.depth() == TWO_JOBS
 
     _scenario(scenario, backend)
 

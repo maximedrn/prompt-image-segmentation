@@ -24,6 +24,7 @@ class ErrorCode(StrEnum):
     UNKNOWN_JOB = "unknown_job"
     QUEUE_FULL = "queue_full"
     IDEMPOTENCY_CONFLICT = "idempotency_conflict"
+    IDEMPOTENCY_KEY_TOO_LONG = "idempotency_key_too_long"
     ALREADY_STARTED = "already_started"
     INVALID_CALLBACK = "invalid_callback"
     INVALID_IMAGE = "invalid_image"
@@ -152,6 +153,22 @@ class HeaderName:
     #: Read from the request, not set on the response. Named here with
     #: the others because it is part of the same published contract.
     idempotency_key: ClassVar[str] = "Idempotency-Key"
+
+
+@final
+class AuthRules:
+    """Facts about who a caller is, beyond whether they are allowed in."""
+
+    #: Names a caller who presented nothing, which only happens when
+    #: authentication is off. A word rather than an empty string, so a
+    #: scope is never blank.
+    anonymous_principal: ClassVar[str] = "anonymous"
+
+    #: Longest idempotency key the service will store. Room for a UUID,
+    #: a ULID or a caller's own composite key; bounded here rather than
+    #: left to whatever header limit a deployment happens to run with,
+    #: because the key becomes part of a stored key.
+    idempotency_key_max: ClassVar[int] = 255
 
 
 @final
@@ -334,6 +351,9 @@ class JobMessage:
 
     unknown: ClassVar[str] = "No such job, or it has expired."
     queue_full: ClassVar[str] = "The queue is full. Retry shortly."
+    idempotency_key_too_long: ClassVar[str] = (
+        "Idempotency-Key is longer than the service accepts."
+    )
     idempotency_conflict: ClassVar[str] = (
         "This Idempotency-Key was already used for a different request. "
         "Reuse the key only to retry the identical submission."
@@ -506,6 +526,7 @@ class ApiMetadata:
 
 
 __all__: list[str] = [
+    "AuthRules",
     "ApiMetadata",
     "AuthScheme",
     "BasicScheme",

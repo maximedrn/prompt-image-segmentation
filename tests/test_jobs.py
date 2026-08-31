@@ -34,6 +34,8 @@ from app.domain import (
     start,
     succeed,
 )
+from app.interfaces.http.constants import AuthRules
+from app.interfaces.http.routes.jobs import key_within_limit
 from tests.conftest import segment_body
 
 ACCEPTED_AT: Final[float] = 1000.0
@@ -243,3 +245,23 @@ def test_a_defect_still_leaves_a_terminal_state() -> None:
     final_job: Job = store.writes[-1][0]
     assert final_job.state is JobState.FAILED
     assert final_job.error == JobFailure.defect
+
+
+def test_an_overlong_idempotency_key_is_refused() -> None:
+    """The key becomes part of a stored key, so its length is ours.
+
+    Left unbounded, one header would decide how much a ledger entry
+    costs.
+    """
+    assert not key_within_limit("k" * (AuthRules.idempotency_key_max + 1))
+
+
+def test_a_key_within_the_limit_is_accepted() -> None:
+    """The guard refuses the excessive, not everything."""
+    assert key_within_limit("k" * AuthRules.idempotency_key_max)
+    assert key_within_limit("a-normal-uuid-shaped-key")
+
+
+def test_no_key_at_all_is_accepted() -> None:
+    """Idempotency stays optional, so its absence is never a refusal."""
+    assert key_within_limit(None)

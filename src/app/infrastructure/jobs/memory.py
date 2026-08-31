@@ -38,6 +38,21 @@ class _Entry:
     expires_at: float
 
 
+def _claim_key(idempotency: IdempotentRequest) -> tuple[str, str]:
+    """Name a claim by who made it as well as by what they called it.
+
+    The key is a string the caller picks, so two callers picking the
+    same one must not share an entry -- the second would be handed the
+    first's job.
+
+    :param idempotency: The caller's claim.
+    :type idempotency: app.application.jobs.IdempotentRequest
+    :returns: The scoped claim key.
+    :rtype: tuple[str, str]
+    """
+    return (idempotency.scope, idempotency.key)
+
+
 @final
 @dataclass(slots=True)
 class _Claim:
@@ -65,7 +80,7 @@ class InMemoryJobStore:
         """
         self._policy: JobPolicy = policy
         self._entries: dict[str, _Entry] = {}
-        self._claims: dict[str, _Claim] = {}
+        self._claims: dict[tuple[str, str], _Claim] = {}
         self._queue: deque[str] = deque()
         # Lets ``claim`` sleep until there is work rather than poll for
         # it, which is what keeps an idle worker off the CPU.
@@ -146,7 +161,9 @@ class InMemoryJobStore:
         """
         self._purge()
         if idempotency is not None:
-            if (spent := self._claims.get(idempotency.key)) is not None:
+            if (
+                spent := self._claims.get(_claim_key(idempotency))
+            ) is not None:
                 return (
                     Admission.replay(spent.identifier)
                     if spent.request_hash == idempotency.request_hash
@@ -162,7 +179,7 @@ class InMemoryJobStore:
         )
         self._queue.append(job.identifier)
         if idempotency is not None:
-            self._claims[idempotency.key] = _Claim(
+            self._claims[_claim_key(idempotency)] = _Claim(
                 request_hash=idempotency.request_hash,
                 identifier=job.identifier,
                 expires_at=self._expiry(),

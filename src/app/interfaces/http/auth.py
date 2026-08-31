@@ -12,6 +12,7 @@ what it puts in the header.
 from base64 import b64decode
 from collections.abc import Mapping
 from dataclasses import dataclass
+from hashlib import sha256
 from secrets import compare_digest
 from typing import Annotated, final
 
@@ -19,7 +20,7 @@ from fastapi import Depends, Request
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 
 from app.infrastructure.imaging.types import TextEncoding
-from app.interfaces.http.constants import BasicScheme, Message
+from app.interfaces.http.constants import AuthRules, BasicScheme, Message
 from app.settings import Settings
 
 _SECURITY: HTTPBasic = HTTPBasic(auto_error=False)
@@ -35,6 +36,24 @@ class Unauthorized(Exception):
     """The caller presented absent or invalid credentials."""
 
     message: str
+
+
+def principal_digest(credentials: HTTPBasicCredentials | None) -> str:
+    """Name the caller behind a request without keeping what they sent.
+
+    A digest of the username, so anything scoped by it is scoped by
+    identity rather than by a string the caller chose. The service has
+    one configured account today and this is one value; the day it has
+    more, whatever this scopes starts isolating on its own.
+
+    :param credentials: Credentials FastAPI parsed, if any.
+    :type credentials: fastapi.security.HTTPBasicCredentials | None
+    :returns: A stable identifier for the caller.
+    :rtype: str
+    """
+    if credentials is None:
+        return AuthRules.anonymous_principal
+    return sha256(credentials.username.encode(TextEncoding.UTF8)).hexdigest()
 
 
 def require_credentials(
@@ -118,6 +137,7 @@ def socket_authorised(headers: Mapping[str, str], settings: Settings) -> bool:
 
 
 __all__: list[str] = [
+    "principal_digest",
     "Unauthorized",
     "require_credentials",
     "socket_authorised",

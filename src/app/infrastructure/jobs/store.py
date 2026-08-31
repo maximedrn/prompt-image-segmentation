@@ -308,7 +308,9 @@ class RedisJobStore:
         claim_key: str | None = (
             None
             if idempotency is None
-            else f"{JobKeys.idempotency}{idempotency.key}"
+            # Scope first, and it is a fixed-length digest, so no pair of
+            # (scope, key) can spell the same Redis key as another pair.
+            else f"{JobKeys.idempotency}{idempotency.scope}:{idempotency.key}"
         )
         async with _reachable():
             async with self._client.pipeline(transaction=True) as batch:

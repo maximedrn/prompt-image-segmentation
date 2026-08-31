@@ -29,8 +29,13 @@ from app.domain import (
 )
 from app.infrastructure.jobs.hashing import request_hash
 from app.infrastructure.webhooks.notifier import acceptable
-from app.interfaces.http.auth import require_credentials
+from app.interfaces.http.auth import (
+    Credentials,
+    principal_digest,
+    require_credentials,
+)
 from app.interfaces.http.constants import (
+    AuthRules,
     Documented,
     ErrorCode,
     HeaderName,
@@ -82,6 +87,23 @@ def _failures(statuses: tuple[HTTPStatus, ...]) -> _Responses:
     return {status: {OpenApiKey.model: ErrorSchema} for status in statuses}
 
 
+def key_within_limit(idempotency_key: str | None) -> bool:
+    """Report whether a caller's retry key is short enough to store.
+
+    The key becomes part of a stored key, so its length is the
+    service's to decide rather than something inherited from whatever
+    header limit a deployment happens to run with.
+
+    :param idempotency_key: The caller's retry key, when they sent one.
+    :type idempotency_key: str | None
+    :returns: ``True`` when there is no key, or it is within the bound.
+    :rtype: bool
+    """
+    if idempotency_key is None:
+        return True
+    return len(idempotency_key) <= AuthRules.idempotency_key_max
+
+
 @segmentation_router.post(
     HttpRoute.jobs,
     response_model=JobSchema,
@@ -93,6 +115,7 @@ def _failures(statuses: tuple[HTTPStatus, ...]) -> _Responses:
 async def create_job(
     request: Request,
     form: Annotated[SegmentForm, Form()],
+    credentials: Credentials = None,
     idempotency_key: Annotated[
         str | None, Header(alias=HeaderName.idempotency_key)
     ] = None,
@@ -109,6 +132,9 @@ async def create_job(
     :type request: fastapi.Request
     :param form: The whole multipart body, already validated.
     :type form: app.interfaces.http.schemas.SegmentForm
+    :param credentials: Credentials the caller presented, used only to
+        name whose idempotency key this is.
+    :type credentials: fastapi.security.HTTPBasicCredentials | None
     :param idempotency_key: The caller's retry key, when they sent one.
     :type idempotency_key: str | None
     :returns: The accepted job, or a failure response.
@@ -163,6 +189,12 @@ async def create_job(
         options=form.to_options(),
         callback_url=form.callback_url,
     )
+    if not key_within_limit(idempotency_key):
+        return failure_response(
+            HTTPStatus.UNPROCESSABLE_CONTENT,
+            ErrorCode.IDEMPOTENCY_KEY_TOO_LONG,
+            JobMessage.idempotency_key_too_long,
+        )
     admission: Admission = await store.enqueue(
         job,
         job_payload,
@@ -172,6 +204,9 @@ async def create_job(
             else IdempotentRequest(
                 key=idempotency_key,
                 request_hash=request_hash(job_payload),
+                # Who is claiming the key, so one caller's choice of
+                # string cannot answer another caller's submission.
+                scope=principal_digest(credentials),
             )
         ),
     )
